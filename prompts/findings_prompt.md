@@ -172,6 +172,10 @@ The strongest findings usually show up here.
 - Reviewers making opposite corrections to the same source, or the AI handling the same source differently
   across languages, is a contested item.
 
+Read every overall comment against your themes as well. A reviewer who describes a problem in their
+overall comment (for example, "frequently ignores the translation memory") is evidence for that theme even
+if they logged no item for it. List such languages in the theme's languages line as "comment only".
+
 ### 5. Build the themes
 
 Group the root causes into four to eight themes. Rank them by harm:
@@ -254,6 +258,10 @@ Otherwise give a status even when the evidence is limited, and say so.
 Finish with one or two sentences of reasoning that cite the data. Few logged items is not evidence of good
 quality, so say what is missing.
 
+The report reads these lines to fill its scorecard and language sections. So use each language name exactly
+as it appears in the JSON `language` field, write the status exactly as one of the five above, and keep to
+the line format shown under "Output format".
+
 ### 8. Actions
 
 Recommend up to eight actions, in priority order: cheap, high-impact setup fixes first. For each, name the
@@ -270,7 +278,8 @@ small samples, call a change a signal, not a trend.
 
 - Every number matches the JSON or your per-row theme list, and the totals add up.
 - Every example is quoted exactly and glossed.
-- Every language in the data appears under "Language assessments".
+- Every language in the data appears under "Language assessments", with its name exactly as in the JSON.
+- The bottom line agrees with the summary and the assessments.
 - Every theme names its languages.
 - No claim about a language lacks a row or comment to support it.
 - In `forms` mode, no TER is described as job-level.
@@ -285,6 +294,11 @@ Aim for 800 to 1,600 words, not counting quoted examples. Don't restate every it
 each one with its changes highlighted. Spend words on causes and fixes, not on retelling items.
 
 ```markdown
+# Bottom line
+
+<One or two sentences for a manager: whether the AI output is usable, where it isn't, and the single most
+important action.>
+
 # Summary
 
 1. **<One-sentence finding.>** <One to three sentences of evidence, with numbers.>
@@ -328,3 +342,6 @@ can't show, and gives the overall share of characters changed.)
 
 Leave out "Decisions needed" if there are none. If previous findings were provided, add a
 "# Compared with the last drop" section after the Summary.
+
+The report shows the bottom line at the top of the page and adds its own note that the findings were
+drafted with AI, so don't add a disclaimer of your own.

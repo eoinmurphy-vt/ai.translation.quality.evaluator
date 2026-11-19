@@ -1,8 +1,9 @@
 """HTML report: one self-contained file that opens in any browser, with no internet connection needed.
 
-It holds everything that can be produced from the data: headline counts, edit-rate and effort charts,
-a scorecard, the severity and category breakdown (forms), reviewers' overall comments and every item
-with its changes highlighted. Written findings can be added from a Markdown file (--notes).
+It holds everything that can be produced from the data: headline counts, edit-rate and effort charts with
+caveats, a scorecard, the severity and category breakdown and a form check (forms), reviewers' overall
+comments and every item with its changes highlighted. Written findings can be added from a Markdown file
+(--notes). Their bottom line is shown at the top, and their language assessments fill the scorecard.
 """
 import html
 import re
@@ -16,6 +17,14 @@ MAX_ITEMS_PER_LANGUAGE = 400   # export comparisons can have thousands of segmen
 BAND_STATUS = {"unchanged": "good", "light": "good", "moderate": "warning", "heavy": "serious", "rewrite": "critical"}
 BAND_SHORT = {"unchanged": "No edits", "light": "Light", "moderate": "Moderate", "heavy": "Heavy",
               "rewrite": "Close to retranslation"}
+# Language assessment statuses used by prompts/findings_prompt.md, and their colour.
+STATUS_CLASS = {"not usable as-is": "critical", "needs targeted fixes": "warning", "usable with light edits": "good",
+                "good": "good", "can't assess": "none", "cannot assess": "none"}
+THEME_TAGS = {"critical": "s0", "major": "s1", "minor": "s2", "decision needed": "decide"}
+
+AI_NOTE = ("<b>AI-assisted.</b> These findings were drafted with AI from the evaluation data and checked against "
+           "it. AI can make mistakes: check the examples, back-translations and conclusions before you share or "
+           "act on them.")
 
 
 def esc(value):
@@ -48,38 +57,67 @@ def _pct(value, digits=0):
     return "–" if value is None else f"{value * 100:.{digits}f}%"
 
 
+def _words(value):
+    """'1204' -> '1,204'; anything that isn't a plain number is shown as written."""
+    text = str(value or "").strip()
+    return f"{int(text):,}" if re.fullmatch(r"\d+", text) else text
+
+
 def _anchor(language):
     return "lang-" + re.sub(r"[^a-z0-9]+", "-", language.lower()).strip("-")
 
 
-def _status(ter):
+def _list_names(names):
+    names = list(names)
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _band_chip(ter, prefix=""):
     b = band(ter)
     if b is None:
         return '<span class="status none"><i></i>Not measured</span>'
-    return f'<span class="status {BAND_STATUS[b]}"><i></i>{BAND_SHORT[b]}</span>'
+    return f'<span class="status {BAND_STATUS[b]}"><i></i>{prefix}{BAND_SHORT[b]}</span>'
+
+
+def _assessment_chip(a):
+    return f'<span class="status {a["cls"]}"><i></i>{esc(a["status"])}</span>'
 
 # =============================================================== Markdown notes
+
+
+def _inline(t):
+    t = esc(t)
+    t = re.sub(r"`([^`]+)`", r"<code>\1</code>", t)
+    t = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", t)
+    t = re.sub(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", r"<em>\1</em>", t)
+    t = re.sub(r"(?<![\w])_(?!\s)(.+?)(?<!\s)_(?![\w])", r"<em>\1</em>", t)
+    return re.sub(r"\[([^\]]+)\]\(((?:https?://|mailto:)[^)\s]+)\)", r'<a href="\2">\1</a>', t)
+
+
+_THEME_TAG = re.compile(r"\s*\((critical|major|minor|decision needed)\)\s*$", re.I)
+
+
+def _heading(text):
+    """Heading text; a trailing '(Critical)', '(Major)', '(Minor)' or '(Decision needed)' becomes a tag."""
+    tag = _THEME_TAG.search(text)
+    if not tag:
+        return _inline(text)
+    label = tag.group(1)
+    return (f'{_inline(text[:tag.start()])} <span class="sev tag {THEME_TAGS[label.lower()]}"><i></i>'
+            f'{esc(label[0].upper() + label[1:])}</span>')
 
 
 def markdown(text):
     """Small, safe Markdown subset: headings, paragraphs, lists, quotes, bold, italics, code, links."""
     out, para, lst = [], [], []
 
-    def inline(t):
-        t = esc(t)
-        t = re.sub(r"`([^`]+)`", r"<code>\1</code>", t)
-        t = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", t)
-        t = re.sub(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", r"<em>\1</em>", t)
-        t = re.sub(r"(?<![\w])_(?!\s)(.+?)(?<!\s)_(?![\w])", r"<em>\1</em>", t)
-        return re.sub(r"\[([^\]]+)\]\(((?:https?://|mailto:)[^)\s]+)\)", r'<a href="\2">\1</a>', t)
-
     def flush():
         if para:
-            out.append("<p>" + inline(" ".join(para)) + "</p>")
+            out.append("<p>" + _inline(" ".join(para)) + "</p>")
             para.clear()
         if lst:
             tag = lst[0]
-            out.append(f"<{tag}>" + "".join(f"<li>{inline(i)}</li>" for i in lst[1:]) + f"</{tag}>")
+            out.append(f"<{tag}>" + "".join(f"<li>{_inline(i)}</li>" for i in lst[1:]) + f"</{tag}>")
             lst.clear()
 
     for line in (text or "").replace("\r\n", "\n").split("\n"):
@@ -93,7 +131,7 @@ def markdown(text):
         if heading:
             flush()
             level = len(heading.group(1)) + 2
-            out.append(f"<h{level}>{inline(heading.group(2))}</h{level}>")
+            out.append(f"<h{level}>{_heading(heading.group(2))}</h{level}>")
         elif bullet or number:
             tag = "ul" if bullet else "ol"
             if para or (lst and lst[0] != tag):
@@ -103,7 +141,7 @@ def markdown(text):
             lst.append((bullet or number).group(1))
         elif s.startswith(">"):
             flush()
-            out.append("<blockquote>" + inline(s.lstrip("> ")) + "</blockquote>")
+            out.append("<blockquote>" + _inline(s.lstrip("> ")) + "</blockquote>")
         elif lst and line[:1] in (" ", "\t"):
             lst[-1] += " " + s
         else:
@@ -112,6 +150,75 @@ def markdown(text):
             para.append(s)
     flush()
     return "\n".join(out)
+
+# =============================================================== reading the findings
+
+_ASSESSMENT = re.compile(
+    r"^\s*[-*]\s+\*\*(?P<lang>.+?)\*\*\s*[:–-]\s*(?P<status>[^(]+?)\s*"
+    r"\(evidence:\s*(?P<evidence>[^,)]+?)\s*(?:,\s*(?P<basis>[^)]*))?\)\.?\s*(?P<reason>.*)$", re.I)
+
+
+def _match_language(name, languages):
+    if name in languages:
+        return name
+    low = {l.lower(): l for l in languages}
+    if name.lower() in low:
+        return low[name.lower()]
+    base = lambda s: re.sub(r"\s*\(.*\)\s*$", "", s).strip().lower()
+    hits = [l for l in languages if base(l) == base(name)]
+    return hits[0] if len(hits) == 1 else None
+
+
+def parse_findings(notes, languages):
+    """Split findings Markdown into (bottom line, body, assessments, unmatched assessment names).
+
+    The bottom line is the text under '# Bottom line' (shown at the top of the report). Assessments are the
+    '- **Language**: Status (evidence: ..., n items). Reason' lines under '# Language assessments'.
+    """
+    bottom, body, found, section, last = [], [], {}, None, None
+    for line in (notes or "").replace("\r\n", "\n").split("\n"):
+        if re.match(r"#\s+\S", line):
+            section = line[1:].strip().lower()
+            if section == "bottom line":
+                continue
+        if section == "bottom line":
+            bottom.append(line.strip())
+            continue
+        body.append(line)
+        if section == "language assessments":
+            m = _ASSESSMENT.match(line)
+            if m:
+                status = m.group("status").strip().rstrip(".")
+                last = m.group("lang").strip()
+                found[last] = {
+                    "status": status, "cls": STATUS_CLASS.get(status.lower(), "none"),
+                    "evidence": m.group("evidence").strip(), "basis": (m.group("basis") or "").strip(),
+                    "reason": m.group("reason").strip()}
+            elif last and line[:1] in (" ", "\t") and line.strip():
+                found[last]["reason"] = (found[last]["reason"] + " " + line.strip()).strip()
+            else:
+                last = None
+    assessments, unmatched = {}, []
+    for name, a in found.items():
+        lang = _match_language(name, languages)
+        if lang:
+            assessments[lang] = a
+        else:
+            unmatched.append(name)
+    return " ".join(b for b in bottom if b), "\n".join(body).strip(), assessments, unmatched
+
+
+def findings_warnings(notes, rows):
+    """Problems a reader of the report would notice: languages without an assessment, names that match none."""
+    languages = list(dict.fromkeys(r["language"] for r in rows))
+    bottom, _body, assessments, unmatched = parse_findings(notes, languages)
+    warnings = [f"Assessment for '{n}' matches no language in the data." for n in unmatched]
+    missing = [l for l in languages if l not in assessments]
+    if missing:
+        warnings.append("No language assessment for: " + ", ".join(missing))
+    if not bottom:
+        warnings.append("No '# Bottom line' section.")
+    return warnings
 
 # =============================================================== charts
 
@@ -124,6 +231,7 @@ def _by_language(rows):
 
 
 def _ordered(stats):
+    """One order for every chart and table: highest TER first, unmeasured languages last."""
     return sorted(stats, key=lambda lang: (stats[lang]["ter"] is None, -(stats[lang]["ter"] or 0)))
 
 
@@ -167,14 +275,54 @@ def _strip_chart(stats, groups):
             'over 50% close to retranslation. Segments above 100% are drawn at 100%.</p>')
 
 
+def _caveats(stats, groups, levels, mode):
+    """'Reading these numbers': caveats worked out from the data, so they're the same every run."""
+    notes = []
+    if mode == "forms":
+        notes.append("These figures cover only the segments reviewers logged, usually the problem ones. They show "
+                     "how heavily those segments were rewritten, not the AI's quality across the whole job; compare "
+                     "full exports (compare mode) for that.")
+        few = [l for l in _ordered(stats) if 0 < stats[l]["measured"] <= 2]
+        if few:
+            notes.append(f"{_list_names(few)} rest{'s' if len(few) == 1 else ''} on one or two segments, so "
+                         f"{'its figure' if len(few) == 1 else 'their figures'} can swing on a single edit.")
+        none = [l for l in _ordered(stats) if stats[l]["measured"] == 0]
+        if none:
+            notes.append(f"{_list_names(none)} {'has' if len(none) == 1 else 'have'} no segment text to measure.")
+        if len(levels) >= 3:
+            minor = {l: sum(1 for r in groups[l] if r.get("severity") == levels[2]) for l in _ordered(stats)}
+            minor = {l: n for l, n in minor.items() if n}
+            if minor:
+                who = _list_names(f"{l} ({n})" for l, n in minor.items())
+                notes.append(f"{who} also logged {levels[2]} items. These usually need fewer edits, so "
+                             f"{'its' if len(minor) == 1 else 'their'} TER isn't directly comparable with languages "
+                             f"that logged only {levels[0]} and {levels[1]} items.")
+        blank = {l: sum(1 for r in groups[l] if not r.get("severity")) for l in _ordered(stats)}
+        blank = {l: n for l, n in blank.items() if n}
+        if blank:
+            notes.append(_list_names(f"{l} ({n})" for l, n in blank.items()) + " left severity blank on some or all "
+                         "items, so severity counts aren't comparable across languages.")
+    else:
+        small = [l for l in _ordered(stats) if 0 < stats[l]["measured"] < 20]
+        if small:
+            notes.append(f"{_list_names(small)} {'has' if len(small) == 1 else 'have'} fewer than 20 segments, so "
+                         f"{'its' if len(small) == 1 else 'their'} TER can swing on a few edits.")
+    chars = [l for l in _ordered(stats) if stats[l]["unit"] == "char"]
+    if chars and len(chars) < len(stats):
+        notes.append(f"{_list_names(chars)} {'is' if len(chars) == 1 else 'are'} measured per character, because "
+                     f"{'it doesn’t' if len(chars) == 1 else 'they don’t'} put spaces between words. Compare "
+                     f"{'it' if len(chars) == 1 else 'them'} with the other languages on the character edit rate.")
+    return ('<div class="caveats"><h3>Reading these numbers</h3><ul>'
+            + "".join(f"<li>{esc(n)}</li>" for n in notes) + "</ul></div>") if notes else ""
+
+
 def _sev_class(severity, levels):
     if not severity:
         return "sn"
     return f"s{levels.index(severity)}" if severity in levels[:3] else "sx"
 
 
-def _severity_bars(rows, levels):
-    groups = _by_language(rows)
+def _severity_bars(stats, groups, levels):
     names = levels + ["Other", "Not given"]
     counts = {}
     for lang, items in groups.items():
@@ -185,11 +333,12 @@ def _severity_bars(rows, levels):
         counts[lang] = c
     used = [n for n in names if any(c[n] for c in counts.values())]
     biggest = max((sum(c.values()) for c in counts.values()), default=1)
+
     def cls(name):
         return {"Other": "sx", "Not given": "sn"}.get(name) or _sev_class(name, levels)
 
     bars = []
-    for lang in sorted(counts, key=lambda k: -sum(counts[k].values())):
+    for lang in _ordered(stats):
         c, total = counts[lang], sum(counts[lang].values())
         segs = "".join(f'<span class="seg {cls(n)}" style="flex:{c[n]}" data-tip="{esc(lang)}: {c[n]} {esc(n)}">'
                        f'{"<span>" + str(c[n]) + "</span>" if c[n] >= 2 else ""}</span>' for n in used if c[n])
@@ -200,15 +349,15 @@ def _severity_bars(rows, levels):
     return f'<div class="legend">{legend}</div><div class="bars">{"".join(bars)}</div>'
 
 
-def _category_table(rows):
-    groups = _by_language(rows)
+def _category_table(stats, groups, rows):
     totals = {}
     for r in rows:
         totals[r.get("category") or "None given"] = totals.get(r.get("category") or "None given", 0) + 1
     cats = sorted(totals, key=lambda c: -totals[c])
     level = lambda n: 0 if n == 0 else 1 if n == 1 else 2 if n <= 3 else 3 if n <= 6 else 4
     body = []
-    for lang, items in groups.items():
+    for lang in _ordered(stats):
+        items = groups[lang]
         c = {cat: sum(1 for r in items if (r.get("category") or "None given") == cat) for cat in cats}
         cells = "".join(f'<td class="h{level(c[cat])}">{c[cat] or "·"}</td>' for cat in cats)
         body.append(f'<tr><th scope="row">{esc(lang)}</th>{cells}<td class="tot">{len(items)}</td></tr>')
@@ -239,7 +388,7 @@ def _effort_bars(stats):
     legend = "".join(f'<span class="lg"><i class="sw b-{b}"></i>{esc(label)}</span>' for b, label, _ in used)
     return f'<div class="legend">{legend}</div><div class="bars">{"".join(bars)}</div>'
 
-# =============================================================== tables and detail
+# =============================================================== tables
 
 
 def _sev_chips(items, levels):
@@ -252,41 +401,110 @@ def _sev_chips(items, levels):
                     for k in order if counts.get(k))
 
 
-def _scorecard_forms(stats, forms, groups, levels):
+def _assessment_cells(a):
+    if not a:
+        return '<td class="muted">Not assessed</td><td class="muted">–</td>'
+    basis = f'<span class="note">{esc(a["basis"])}</span>' if a["basis"] else ""
+    return (f'<td class="verdict">{_assessment_chip(a)}<span class="vtext">{_inline(a["reason"])}</span></td>'
+            f'<td>{esc(a["evidence"][:1].upper() + a["evidence"][1:])}{basis}</td>')
+
+
+def _scorecard_forms(stats, forms, groups, levels, assessments):
+    not_given = '<span class="muted">Not given</span>'
     rows = []
     for lang in _ordered(stats):
         s, lf = stats[lang], [f for f in forms if f["language"] == lang]
         teams = ", ".join(sorted({f.get("team") for f in lf if f.get("team")}))
-        words = ", ".join(str(f.get("word_count")) for f in lf if f.get("word_count"))
-        not_given = '<span class="muted">Not given</span>'
+        words = ", ".join(_words(f.get("word_count")) for f in lf if f.get("word_count"))
+        last = (_assessment_cells(assessments.get(lang)) if assessments
+                else f'<td>{_band_chip(s["ter"])}</td>')
         rows.append(f'<tr><th scope="row"><a href="#{_anchor(lang)}">{esc(lang)}</a></th><td class="num">{len(lf)}</td>'
-                    f'<td>{esc(teams) if teams else not_given}</td>'
-                    f'<td>{esc(words) if words else not_given}</td><td class="num">{s["rows"]}</td>'
-                    f'<td class="chips">{_sev_chips(groups[lang], levels)}</td><td class="num">{_pct(s["ter"])}</td>'
-                    f'<td>{_status(s["ter"])}</td><td class="num">{_pct(s["char_rate"])}</td></tr>')
+                    f'<td>{esc(teams) if teams else not_given}</td><td>{esc(words) if words else not_given}</td>'
+                    f'<td class="num">{s["rows"]}</td><td class="chips">{_sev_chips(groups[lang], levels)}</td>'
+                    f'<td class="num">{_pct(s["ter"])}</td><td class="num">{_pct(s["char_rate"])}</td>{last}</tr>')
+    last_head = ("<th>Assessment</th><th>Evidence</th>" if assessments
+                 else "<th>Edit level (logged segments)</th>")
     legend = " ".join(f'<span class="mini {_sev_class(l, levels)}">n</span> {esc(l)}' for l in levels[:3])
+    note = ("Assessments come from the findings. " if assessments else
+            "The edit level is the rule-of-thumb band for TER on the logged segments, not a verdict on the language. ")
     return (f'<div class="tblwrap"><table class="score"><thead><tr><th>Language</th><th class="num">Forms</th>'
             f'<th>Reviewer team</th><th>Word count</th><th class="num">Items</th><th>By severity</th>'
-            f'<th class="num">TER</th><th>Editing on logged segments</th><th class="num">Char. edits</th></tr></thead>'
+            f'<th class="num">TER</th><th class="num">Char. edits</th>{last_head}</tr></thead>'
             f'<tbody>{"".join(rows)}</tbody></table></div>'
-            f'<p class="fine">TER and character edit rate cover the logged segments only. Severity: {legend} '
+            f'<p class="fine">{note}TER and character edit rate cover the logged segments only. Severity: {legend} '
             f'<span class="mini sn">n</span> none given.</p>')
 
 
-def _scorecard_pairs(stats):
+def _scorecard_pairs(stats, assessments):
     rows = []
     for lang in _ordered(stats):
         s = stats[lang]
         share = s["unchanged"] / s["measured"] if s["measured"] else None
+        extra = _assessment_cells(assessments.get(lang)) if assessments else ""
         rows.append(f'<tr><th scope="row"><a href="#{_anchor(lang)}">{esc(lang)}</a></th>'
                     f'<td class="num">{s["rows"]}</td><td class="num">{s["measured"]}</td>'
                     f'<td class="num">{s["unchanged"]}</td><td class="num">{_pct(share)}</td>'
-                    f'<td class="num">{_pct(s["ter"], 1)}</td><td>{_status(s["ter"])}</td>'
-                    f'<td class="num">{_pct(s["char_rate"], 1)}</td><td>{"characters" if s["unit"] == "char" else "words"}</td></tr>')
+                    f'<td class="num">{_pct(s["ter"], 1)}</td><td>{_band_chip(s["ter"])}</td>'
+                    f'<td class="num">{_pct(s["char_rate"], 1)}</td>'
+                    f'<td>{"characters" if s["unit"] == "char" else "words"}</td>{extra}</tr>')
+    extra_head = "<th>Assessment</th><th>Evidence</th>" if assessments else ""
     return (f'<div class="tblwrap"><table class="score"><thead><tr><th>Language</th><th class="num">Segments</th>'
             f'<th class="num">Measured</th><th class="num">Unchanged</th><th class="num">% unchanged</th>'
             f'<th class="num">TER</th><th>Editing needed</th><th class="num">Char. edits</th><th>Counted in</th>'
-            f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>')
+            f'{extra_head}</tr></thead><tbody>{"".join(rows)}</tbody></table></div>')
+
+
+_LOCALE = re.compile(r"[A-Za-z]{2,3}[-_][A-Za-z]{2}")
+
+
+def _form_check(stats, forms, rows, levels):
+    """Completeness of each form, worked out from the data so it is the same every run."""
+    order = {lang: i for i, lang in enumerate(_ordered(stats))}
+    complete, body = 0, []
+    for f in sorted(forms, key=lambda f: (order.get(f["language"], 99), f["file"])):
+        items = [r for r in rows if r["file"] == f["file"]]
+        n = len(items)
+        team = f.get("team") or ""
+        missing = [label for key, label in (("language_entered", "language"), ("team", "team"),
+                                            ("project", "project"), ("word_count", "word count"),
+                                            ("overall_comment", "overall comment")) if not f.get(key)]
+        gaps = [f"{n - c} without {what}" for c, what in (
+            (sum(1 for r in items if r.get("severity")), "severity"),
+            (sum(1 for r in items if r.get("category")), "category"),
+            (sum(1 for r in items if r.get("comment")), "comment")) if n - c]
+        notes = []
+        if team and _LOCALE.fullmatch(team.strip()):
+            notes.append(f"Team field holds a locale code (“{team}”)")
+        if len(levels) >= 3:
+            minor = sum(1 for r in items if r.get("severity") == levels[2])
+            if minor:
+                notes.append(f"{minor} {levels[2]} item{'s' if minor != 1 else ''} logged")
+        multi = sum(1 for r in items if r.get("raw_measured", r["raw"]) != r["raw"])
+        if multi:
+            notes.append(f"{multi} cell{'s' if multi != 1 else ''} with more than one AI output (first measured)")
+        unmeasured = sum(1 for r in items if not r["metrics"])
+        if unmeasured:
+            notes.append(f"{unmeasured} item{'s' if unmeasured != 1 else ''} with no text to compare")
+        ok = not missing and not gaps and not (team and _LOCALE.fullmatch(team.strip()))
+        complete += ok
+        tasks = list(dict.fromkeys(r["task"] for r in items if r.get("task")))
+        shown = "; ".join(t if len(t) <= 70 else t[:67] + "…" for t in tasks[:2])
+        more = f" (+{len(tasks) - 2} more)" if len(tasks) > 2 else ""
+        content = " · ".join(x for x in (esc(f.get("project") or ""), esc(shown) + more) if x.strip()) or \
+            '<span class="muted">Not given</span>'
+        body.append(
+            f'<tr><th scope="row">{esc(f["language"])}<span class="note">{esc(f["file"])}</span></th>'
+            f'<td class="{"ok" if not missing else "miss"}">{"Complete" if not missing else "Missing: " + ", ".join(missing)}</td>'
+            f'<td class="num">{n}</td>'
+            f'<td class="{"ok" if not gaps else "miss"}">{"All rated, categorised and commented" if not gaps else "; ".join(gaps)}</td>'
+            f'<td>{"; ".join(esc(x) for x in notes) or "–"}</td><td class="content">{content}</td></tr>')
+    summary = (f"<b>Complete forms: {complete} of {len(forms)}.</b> A complete form has every header field filled "
+               "in, and every item rated, categorised and commented.")
+    return (f'<p class="sub-lede">{summary}</p><div class="tblwrap"><table class="score check"><thead><tr>'
+            '<th>Form</th><th>Header fields</th><th class="num">Items</th><th>Items</th><th>Other notes</th>'
+            f'<th>Content reviewed</th></tr></thead><tbody>{"".join(body)}</tbody></table></div>')
+
+# =============================================================== detail
 
 
 def _item_card(r, levels, final_label):
@@ -316,19 +534,22 @@ def _item_card(r, levels, final_label):
     return f'<article class="item"><header>{"".join(head)}</header><dl>{"".join(body)}</dl></article>'
 
 
-def _detail(stats, groups, forms, levels, mode):
+def _detail(stats, groups, forms, levels, mode, assessments):
     sections = []
     for lang in _ordered(stats):
         s, items = stats[lang], groups[lang]
+        a = assessments.get(lang)
         facts, comments = [], []
         if mode == "forms":
-            for f in (x for x in forms if x["language"] == lang):
+            lang_forms = [x for x in forms if x["language"] == lang]
+            for f in lang_forms:
                 facts.append(f'<span><b>Form</b> {esc(f["file"])}</span>')
                 for key, label in (("team", "Team"), ("project", "Project"), ("word_count", "Words")):
                     if f.get(key):
-                        facts.append(f'<span><b>{label}</b> {esc(f[key])}</span>')
+                        value = _words(f[key]) if key == "word_count" else f[key]
+                        facts.append(f'<span><b>{label}</b> {esc(value)}</span>')
                 if f.get("overall_comment"):
-                    who = f'<cite>{esc(f["file"])}</cite>' if sum(1 for x in forms if x["language"] == lang) > 1 else ""
+                    who = f'<cite>{esc(f["file"])}</cite>' if len(lang_forms) > 1 else ""
                     comments.append(f"<blockquote>{_text(f['overall_comment'])}{who}</blockquote>")
             shown, note = items, ""
             if not comments:
@@ -346,11 +567,14 @@ def _detail(stats, groups, forms, levels, mode):
         if s["ter"] is not None:
             facts.append(f'<span><b>TER</b> {_pct(s["ter"], 1)} · {s["edits"]} edits / {s["ref_len"]} '
                          f'{"chars" if s["unit"] == "char" else "tokens"}</span>')
+        chip = _assessment_chip(a) if a else _band_chip(s["ter"], "Edit level: " if s["ter"] is not None else "")
+        verdict = (f'<p class="lverdict">{_inline(a["reason"])} <span class="muted">(Evidence: {esc(a["evidence"])}'
+                   f'{", " + esc(a["basis"]) if a["basis"] else ""}.)</span></p>') if a else ""
         final_label = "Corrected" if mode == "forms" else "Final"
         cards = "".join(_item_card(r, levels, final_label) for r in shown)
         sections.append(
-            f'<section class="lang" id="{_anchor(lang)}"><div class="lang-head"><h3>{esc(lang)}</h3>{_status(s["ter"])}'
-            f'</div><div class="facts">{"".join(facts)}</div>'
+            f'<section class="lang" id="{_anchor(lang)}"><div class="lang-head"><h3>{esc(lang)}</h3>{chip}'
+            f'</div><div class="facts">{"".join(facts)}</div>{verdict}'
             + (f'<h4>Reviewer comments</h4>{"".join(comments)}' if mode == "forms" else "")
             + f'<h4>{"Logged items" if mode == "forms" else "Edited segments"} ({len(shown)})</h4>{note}'
             f'<div class="items">{cards}</div></section>')
@@ -378,18 +602,14 @@ and Lokalise's on-screen form <code>1:name</code> are treated as the same.</p>
 <p><b>Character edit rate</b> = character-level edit distance (spaces ignored) ÷ characters in the final text.</p>
 <p><b>Changes</b> show removed text in red strikethrough and added text in green underline. One or two unchanged
 words between edits are folded into the edit to keep heavy rewrites readable.</p>
-<p>TER counts edits, not their importance: fixing a wrong amount counts the same as fixing a comma. Read it
-alongside the reviewers' severity ratings and comments.</p>"""
-
-FORMS_CAVEAT = ("These figures cover only the segments reviewers logged, usually the problem ones. They show how "
-                "heavily those segments were rewritten, not the AI's quality across the whole job; compare full "
-                "exports (compare mode) for that. Languages measured per character aren't directly comparable with "
-                "the others.")
+<p>The figures, charts, form check and caveats are calculated directly from the data, without AI. TER counts
+edits, not their importance: fixing a wrong amount counts the same as fixing a comma. Read it alongside the
+reviewers' severity ratings and comments.</p>"""
 
 
 def _stats_line_forms(rows, levels, n_forms):
     parts = [f"<span><b>{len(rows)}</b> items logged</span>"]
-    for i, lvl in enumerate(levels):
+    for lvl in levels:
         n = sum(1 for r in rows if r.get("severity") == lvl)
         if n:
             parts.append(f'<span class="sev {_sev_class(lvl, levels)}"><i></i>{n} {esc(lvl)}</span>')
@@ -418,10 +638,14 @@ def _stats_line_pairs(rows, stats):
     return "".join(parts)
 
 
-def build_report(rows, mode, inputs, title=None, notes=None, forms=None, severity_levels=None):
-    """Full HTML page as a string. mode is 'forms' or 'pairs'."""
+def build_report(rows, mode, inputs, title=None, notes=None, forms=None, severity_levels=None, ai_note=True):
+    """Full HTML page as a string. mode is 'forms' or 'pairs'.
+
+    ai_note: show the 'AI can make mistakes' note with the findings (turn off when a person wrote them).
+    """
     levels = list(severity_levels or [])
     stats, groups = summarise(rows), _by_language(rows)
+    bottom_line, body, assessments, _unmatched = parse_findings(notes, list(stats)) if notes else ("", "", {}, [])
     n_lang = len(stats)
     created = datetime.now()
     title = title or "AI translation quality evaluation"
@@ -434,21 +658,30 @@ def build_report(rows, mode, inputs, title=None, notes=None, forms=None, severit
         eyebrow = f"Raw AI vs final · {n_lang} language{'s' if n_lang != 1 else ''} · {created:%d %b %Y}"
         lede = "The raw AI output compared with the final, reviewed text, segment by segment."
         stats_line = _stats_line_pairs(rows, stats)
+    bottom_html = ""
+    if bottom_line:
+        source = ("From the findings below, drafted with AI. AI can make mistakes." if ai_note
+                  else "From the findings below.")
+        bottom_html = (f'<div class="bottom"><span class="eyebrow">Bottom line</span><p>{_inline(bottom_line)}</p>'
+                       f'<span class="note">{source}</span></div>')
 
     toc, sections = [], []
-    if notes:
+    if body or bottom_line:
         toc.append(("findings", "Findings"))
-        sections.append(f'<section id="findings"><div class="findings"><h2>Findings</h2>{markdown(notes)}</div></section>')
+        note = f'<p class="ainote">{AI_NOTE}</p>' if ai_note else ""
+        sections.append(f'<section id="findings"><div class="findings"><h2>Findings</h2>{note}{markdown(body)}'
+                        '</div></section>')
     toc.append(("ter", "Edit rates"))
-    caveat = f'<p class="callout">{FORMS_CAVEAT}</p>' if mode == "forms" else ""
     sections.append(
         '<section id="ter"><div class="sec-head"><span class="eyebrow">Translation edit rate</span>'
         f'<h2>{"How much the logged segments had to change" if mode == "forms" else "How much the AI output had to change"}'
         '</h2><p>TER counts the edits (words added, removed, replaced or moved) needed to turn the raw AI output into '
         'the final version, divided by the length of the final version.</p></div>'
-        f'<div class="panel"><h3>TER by language</h3>{_strip_chart(stats, groups)}</div>{caveat}</section>')
+        f'<div class="panel"><h3>TER by language</h3>{_strip_chart(stats, groups)}</div>'
+        f'{_caveats(stats, groups, levels, mode)}</section>')
     toc.append(("scorecard", "Scorecard"))
-    card = _scorecard_forms(stats, forms, groups, levels) if mode == "forms" else _scorecard_pairs(stats)
+    card = (_scorecard_forms(stats, forms, groups, levels, assessments) if mode == "forms"
+            else _scorecard_pairs(stats, assessments))
     sections.append('<section id="scorecard"><div class="sec-head"><span class="eyebrow">Scorecard</span>'
                     f'<h2>Language by language</h2></div>{card}</section>')
     if mode == "forms":
@@ -457,8 +690,8 @@ def build_report(rows, mode, inputs, title=None, notes=None, forms=None, severit
             '<section id="profile"><div class="sec-head"><span class="eyebrow">Issue profile</span>'
             '<h2>Severity, category and editing effort</h2><p>Severity and category as each reviewer assigned them.'
             '</p></div><div class="two"><div class="panel"><h3>Items logged, by severity</h3>'
-            f'{_severity_bars(rows, levels)}</div><div class="panel"><h3>Items logged, by category</h3>'
-            f'<p class="sub">Darker cells mean more items.</p>{_category_table(rows)}</div></div>'
+            f'{_severity_bars(stats, groups, levels)}</div><div class="panel"><h3>Items logged, by category</h3>'
+            f'<p class="sub">Darker cells mean more items.</p>{_category_table(stats, groups, rows)}</div></div>'
             '<div class="panel" style="margin-top:16px"><h3>Editing effort per logged segment</h3>'
             f'<p class="sub">Share of each language\'s measured segments in each TER band.</p>{_effort_bars(stats)}'
             '</div></section>')
@@ -473,11 +706,22 @@ def build_report(rows, mode, inputs, title=None, notes=None, forms=None, severit
     sections.append('<section id="detail"><div class="sec-head"><span class="eyebrow">Detail</span>'
                     f'<h2>{"Every logged item" if mode == "forms" else "Edited segments"}, by language</h2>'
                     '<p>Use the switch to show the changes, or the raw and final text in full.</p></div>'
-                    f'{_detail(stats, groups, forms, levels, mode)}</section>')
+                    f'{_detail(stats, groups, forms, levels, mode, assessments)}</section>')
+    if mode == "forms":
+        toc.append(("check", "Form check"))
+        sections.append('<section id="check"><div class="sec-head"><span class="eyebrow">Form check</span>'
+                        '<h2>How completely the forms were filled in</h2><p>Gaps here limit what can be measured '
+                        'and make languages harder to compare.</p></div>'
+                        f'{_form_check(stats, forms, rows, levels)}</section>')
     toc.append(("method", "Method"))
     inputs_html = "".join(f"<li><code>{esc(i)}</code></li>" for i in inputs)
+    findings_method = ""
+    if (body or bottom_line) and ai_note:
+        findings_method = ("<p><b>Findings</b> were drafted with AI from this data, following the findings prompt "
+                           "in the tool's repository, and checked against the data. AI can make mistakes, so check "
+                           "the findings before you rely on them.</p>")
     sections.append('<section id="method"><div class="sec-head"><span class="eyebrow">Method</span>'
-                    f'<h2>How the numbers were calculated</h2></div><div class="method">{METHOD}'
+                    f'<h2>How the numbers were calculated</h2></div><div class="method">{METHOD}{findings_method}'
                     f'<p><b>Inputs</b></p><ul>{inputs_html}</ul><p class="muted">Created {created:%d %b %Y %H:%M} '
                     f'by ai.translation.quality.evaluator v{__version__}.</p></div></section>')
 
@@ -487,7 +731,7 @@ def build_report(rows, mode, inputs, title=None, notes=None, forms=None, severit
             f'<meta name="generator" content="ai.translation.quality.evaluator {__version__}">'
             f'<title>{esc(title)}</title><style>{CSS}</style></head><body><div class="wrap">'
             f'<header class="top"><span class="eyebrow">{esc(eyebrow)}</span><h1>{esc(title)}</h1>'
-            f'<p class="lede">{lede}</p><div class="stats">{stats_line}</div>'
+            f'<p class="lede">{lede}</p>{bottom_html}<div class="stats">{stats_line}</div>'
             f'<nav class="toc" aria-label="Contents">{nav}</nav></header>'
             f'{"".join(sections)}</div><div id="tip" hidden></div><script>{JS}</script></body></html>\n')
 
@@ -499,7 +743,8 @@ def write_report(path, page):
 
 CSS = """
 :root{--bg:#f5f6f7;--surface:#fff;--ink:#15191d;--ink-2:#444c55;--muted:#6b737c;--line:#dde1e5;--line-2:#c9ced4;
---accent:#1f5fbf;--accent-wash:#e8effa;--series:#2a78d6;--grid:#e3e6e9;--quote:#f0f3f7;
+--accent:#1f5fbf;--accent-wash:#e8effa;--series:#2a78d6;--grid:#e3e6e9;--quote:#f0f3f7;--note-bg:#fff6e0;--note-line:#e8c66a;
+--ok:#0c7d0c;--miss:#b3401f;
 --s0:#d03b3b;--s1:#ec835a;--s2:#fab219;--sx:#9aa0a6;--sn:#c4c8cc;--on-s0:#fff;--on-s1:#fff;--on-s2:#0b0b0b;--on-sx:#0b0b0b;--on-sn:#15191d;
 --good:#0c7d0c;--warning:#b8860b;--serious:#d0602e;--critical:#c23434;
 --b-unchanged:#c4c8cc;--b-light:#86b6ef;--b-moderate:#3987e5;--b-heavy:#256abf;--b-rewrite:#104281;
@@ -510,6 +755,7 @@ CSS = """
 --f-mono:ui-monospace,"Cascadia Mono",Consolas,"SF Mono",Menlo,monospace;color-scheme:light}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1214;--surface:#171b1f;--ink:#e9ecef;--ink-2:#c2c8ce;
 --muted:#929aa3;--line:#2a3036;--line-2:#39414a;--accent:#7fb0f5;--accent-wash:#1a2a40;--series:#3987e5;--grid:#262c32;--quote:#1c2228;
+--note-bg:#2e2716;--note-line:#8a7130;--ok:#3cbf3c;--miss:#f08a62;
 --sx:#6b7177;--sn:#4d5258;--on-sx:#e9ecef;--on-sn:#e9ecef;--good:#3cbf3c;--warning:#e0a92a;--serious:#ec835a;--critical:#ef6b6b;
 --b-unchanged:#4d5258;--b-light:#184f95;--b-moderate:#2a78d6;--b-heavy:#5598e7;--b-rewrite:#9ec5f4;
 --on-b-unchanged:#e9ecef;--on-b-light:#fff;--on-b-moderate:#fff;--on-b-heavy:#0b0b0b;--on-b-rewrite:#0b0b0b;
@@ -530,23 +776,31 @@ code{font-family:var(--f-mono);font-size:.9em}
 .eyebrow{font-family:var(--f-mono);font-size:.76rem;letter-spacing:.04em;color:var(--muted);text-transform:uppercase}
 .sec-head{display:grid;gap:8px;margin-bottom:18px}.sec-head p{color:var(--ink-2);max-width:70ch}
 header.top{display:grid;gap:14px}.lede{color:var(--ink-2);font-size:1.04rem;max-width:70ch}
+.bottom{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;padding:14px 18px;display:grid;gap:6px;max-width:80ch}
+.bottom p{font-size:1.06rem;font-weight:500;line-height:1.5}.bottom .note{font-size:.76rem;color:var(--muted)}
 .stats{display:flex;flex-wrap:wrap;gap:8px 22px;font-size:.92rem;color:var(--ink-2)}.stats b{color:var(--ink)}
 .toc{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:.88rem;padding-top:10px;border-top:1px solid var(--line)}
 .toc a{text-decoration:none}.toc a:hover{text-decoration:underline}
 .findings{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:24px clamp(16px,3vw,32px);display:grid;gap:12px;max-width:100%}
 .findings p,.findings li{max-width:74ch}.findings ul,.findings ol{margin:0;padding-left:1.3em;display:grid;gap:8px}
 .findings h3{font-size:1.15rem;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
-.findings h2+h3{margin-top:0;padding-top:0;border-top:0}
-.findings h4{font-size:1rem;text-transform:none;letter-spacing:0;color:var(--ink);margin-top:6px}
+.findings h2+h3,.findings .ainote+h3{margin-top:0;padding-top:0;border-top:0}
+.findings h4{font-size:1rem;text-transform:none;letter-spacing:0;color:var(--ink);margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px}
 .findings h5{font-size:.92rem;margin-top:4px}.findings blockquote{margin:0}
+.ainote{background:var(--note-bg);border:1px solid var(--note-line);border-radius:8px;padding:10px 14px;font-size:.86rem;color:var(--ink-2);max-width:80ch}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px clamp(14px,2.5vw,24px);display:grid;gap:14px;align-content:start;min-width:0}
 .panel .sub{font-size:.84rem;color:var(--muted);margin-top:-8px}
 .two{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:16px}
 @media (max-width:820px){.two{grid-template-columns:minmax(0,1fr)}}
-.callout{border-left:3px solid var(--line-2);padding:4px 0 4px 14px;color:var(--ink-2);font-size:.9rem;max-width:74ch;margin-top:16px}
+.caveats{margin-top:16px;border-left:3px solid var(--line-2);padding:2px 0 2px 14px;max-width:80ch}
+.caveats h3{font-size:.76rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px}
+.caveats ul{margin:0;padding-left:1.1em;display:grid;gap:4px;font-size:.88rem;color:var(--ink-2)}
+.sub-lede{color:var(--ink-2);margin-bottom:12px}
 .sev,.status{display:inline-flex;align-items:center;gap:6px;font-size:.8rem;font-weight:600;white-space:nowrap}
 .sev i,.status i{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none}
 .sev.s0 i{background:var(--s0)}.sev.s1 i{background:var(--s1)}.sev.s2 i{background:var(--s2)}.sev.sx i{background:var(--sx)}.sev.sn i{background:var(--sn)}
+.sev.decide i{background:var(--accent);border-radius:2px;transform:rotate(45deg);width:8px;height:8px}
+.sev.tag{font-size:.74rem;padding:1px 9px 1px 7px;border:1px solid var(--line-2);border-radius:999px;background:var(--bg);color:var(--ink-2)}
 .status.good i{background:var(--good)}.status.warning i{background:var(--warning)}.status.serious i{background:var(--serious)}
 .status.critical i{background:var(--critical)}.status.none i{border:2px solid var(--sx)}
 .mini{display:inline-block;min-width:22px;padding:0 6px;border-radius:4px;font:600 .74rem/1.6 var(--f-mono);text-align:center}
@@ -589,7 +843,10 @@ th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px sol
 thead th{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;white-space:nowrap}
 tbody tr:last-child th,tbody tr:last-child td{border-bottom:0}
 .num{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
-table.score{min-width:760px}table.score th[scope=row] a{font-weight:600;text-decoration:none}.chips{white-space:nowrap}
+.note{display:block;font-size:.74rem;color:var(--muted);font-weight:400}
+table.score{min-width:820px}table.score th[scope=row] a{font-weight:600;text-decoration:none}.chips{white-space:nowrap}
+table.score .verdict{min-width:280px}table.score .vtext{display:block;color:var(--ink-2);margin-top:4px;font-size:.82rem}
+table.check td.ok{color:var(--ok)}table.check td.miss{color:var(--miss)}table.check td.content{font-size:.8rem;color:var(--ink-2);overflow-wrap:anywhere;min-width:200px}
 table.heat td{text-align:center;font-family:var(--f-mono);font-weight:600;min-width:56px;border-left:2px solid var(--surface)}
 table.heat thead th{white-space:normal;text-align:center}table.heat thead th:first-child{text-align:left}
 table.heat tbody th{font-weight:500;white-space:nowrap}table.heat td.h0{color:var(--muted);font-weight:400}
@@ -612,6 +869,7 @@ ins{background:var(--ins-bg);color:var(--ins-ink);text-decoration:underline;text
 .lang{display:grid;gap:12px;scroll-margin-top:70px}
 .lang-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px;border-bottom:2px solid var(--ink);padding-bottom:8px}
 .lang-head h3{font-size:1.25rem}
+.lverdict{font-size:.96rem;max-width:80ch}
 .facts{display:flex;flex-wrap:wrap;gap:4px 20px;font-size:.82rem;color:var(--ink-2)}
 .facts b{font-weight:600;color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;margin-right:4px}
 blockquote{margin:0;background:var(--quote);border-radius:8px;padding:12px 16px;font-size:.92rem;color:var(--ink-2);max-width:80ch}

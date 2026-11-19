@@ -73,6 +73,9 @@ def build_parser():
         sp.add_argument("--title", help="title of the HTML report (implies --html)")
         sp.add_argument("--notes", metavar="FILE",
                         help="Markdown file with written findings, shown at the top of the HTML report (implies --html)")
+        sp.add_argument("--no-ai-note", action="store_true",
+                        help="don't show the 'drafted with AI, AI can make mistakes' note with the findings "
+                             "(use only when a person wrote them)")
 
     f = sub.add_parser("forms", help="evaluation forms with logged issues (.xlsx/.xlsm)",
                        description="Read AI Human Evaluation Forms and measure every logged segment.")
@@ -148,7 +151,7 @@ def main(argv=None):
         if want_html:
             from .html_report import build_report, write_report
             page = build_report(rows, "forms" if args.mode == "forms" else "pairs", inputs, title=args.title,
-                                notes=notes, forms=forms, severity_levels=levels)
+                                notes=notes, forms=forms, severity_levels=levels, ai_note=not args.no_ai_note)
             write_report(html_out, page)
     except InputError as exc:
         print(f"\nError: {exc}", file=sys.stderr)
@@ -165,6 +168,10 @@ def main(argv=None):
     print(f"\nWorkbook written to {out}")
     if want_html:
         print(f"HTML report written to {html_out}")
+        if notes:
+            from .html_report import findings_warnings
+            for warning in findings_warnings(notes, rows):
+                print(f"Findings check: {warning}")
     if args.mode == "forms":
         print("Note: forms list only the segments reviewers logged, so this TER describes those segments, "
               "not the whole job.")

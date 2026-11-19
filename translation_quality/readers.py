@@ -25,6 +25,8 @@ DEFAULT_LAYOUT = {
                      "word_count": "B10", "overall_comment": "B11"},
     "severity_levels": ["Critical", "Major", "Minor"],
     "category_separator": " - ",
+    # Language codes to replace after reading them, e.g. {"ja-US": "ja"} when a file named ..._JP_US holds Japanese.
+    "language_overrides": {},
 }
 
 SPREADSHEET_EXT = (".xlsx", ".xlsm")
@@ -94,6 +96,7 @@ def read_forms(paths, layout=None, log=print):
     """
     layout = layout or load_layout()
     cols = {k: (column_index_from_string(v) if v else None) for k, v in layout["columns"].items()}
+    overrides = {k.lower(): v for k, v in (layout.get("language_overrides") or {}).items() if not k.startswith("_")}
     forms, rows = [], []
     for path in find_form_files(paths):
         name = os.path.basename(path)
@@ -108,6 +111,8 @@ def read_forms(paths, layout=None, log=print):
         ws = wb[layout["sheet"]]
         header = {k: _text(ws[addr].value) if addr else "" for k, addr in layout["header_cells"].items()}
         code = code_from_filename(path) or code_from_text(header.get("language"))
+        if code and code.lower() in overrides:
+            code = overrides[code.lower()]
         language = display_name(code) if code else (header.get("language") or os.path.splitext(name)[0])
 
         def cell(r, field):

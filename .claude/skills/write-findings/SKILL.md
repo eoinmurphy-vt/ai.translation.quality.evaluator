@@ -52,6 +52,9 @@ Ask for the forms folder (or the raw and final exports) and the drop name if you
    - Compare each figure in the findings with the JSON (per-language totals and severity counts), and each
      theme count with your per-row theme list.
    - Check that every quoted example appears exactly in the JSON.
+   - Read the `Findings check:` lines the tool prints in step 5. They catch a missing bottom line, a language
+     without an assessment, or an assessment whose name doesn't match the data (the scorecard reads those
+     names). Fix the findings and rebuild until no warnings remain.
    - Fix any mismatch before you report back.
 
 7. **Report back to the user** (in the conversation, not in the findings file) with:

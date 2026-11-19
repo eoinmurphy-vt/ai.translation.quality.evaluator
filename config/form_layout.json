@@ -20,5 +20,9 @@
     "overall_comment": "B11"
   },
   "severity_levels": ["Critical", "Major", "Minor"],
-  "category_separator": " - "
+  "category_separator": " - ",
+  "_language_overrides": "Language codes to replace after they are read from the file name or form. A file named ..._JP_US.xlsm is read as ja-US; this maps it to plain Japanese.",
+  "language_overrides": {
+    "ja-US": "ja"
+  }
 }

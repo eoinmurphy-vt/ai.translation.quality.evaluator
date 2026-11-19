@@ -100,6 +100,7 @@ don't matter):
 | `--html-output FILE` | Write the HTML report to this file instead |
 | `--title TEXT` | Title of the HTML report, e.g. `"Drop 2 review"` |
 | `--notes FILE` | Markdown file with your written findings, shown at the top of the HTML report |
+| `--no-ai-note` | Hide the "drafted with AI, AI can make mistakes" note. Use only when a person wrote the findings |
 | `--json FILE` | Also save all results as JSON, for dashboards or further processing |
 
 `--html-output`, `--title` and `--notes` each turn on the HTML report, so `--html` isn't needed with them.
@@ -131,24 +132,48 @@ TER can go over 100% when the reviewer's version is much shorter than the AI's.
 One self-contained `.html` file that opens in any browser and needs no internet connection, so it can be
 emailed or put on SharePoint as it is. It contains:
 
-- Headline counts: items or segments, severity totals, and how much of the text changed
-- **TER by language**: every segment as a dot, with each language's overall TER marked
-- **Scorecard**: one row per language, with an editing level from the rule of thumb above
+- **Headline counts**: items or segments, severity totals, and how much of the text changed. With findings,
+  their bottom line is shown here too.
+- **Findings** (when you pass `--notes`), with a note that they were drafted with AI and AI can make mistakes
+- **TER by language**: every segment as a dot, with each language's overall TER marked. Below it, *Reading
+  these numbers* gives the caveats for this data: languages resting on one or two segments, languages that
+  also logged Minor items or left severity blank, and languages measured per character.
+- **Scorecard**: one row per language. With findings, it shows each language's assessment and evidence
+  rating. Without them, it shows the TER band for the logged segments, labelled as an edit level, not a
+  verdict.
 - **Issue profile** (forms): items by severity and by category, and how the segments split by amount of
   editing. For export comparisons, the editing split is shown on its own.
-- **Detail**: each form's overall comment, then every item (forms) or every edited segment (exports, most
-  edited first) with its changes highlighted. A switch shows the raw and final text in full instead.
+- **Detail**: each language's assessment (with findings), each form's overall comment, then every item
+  (forms) or every edited segment (exports, most edited first) with its changes highlighted. A switch shows
+  the raw and final text in full instead.
+- **Form check** (forms): which header fields each form is missing, items without a severity, category or
+  comment, a locale code typed into the team field, Minor items, cells holding two AI outputs, and the
+  content each form covers
 - **Method**: how the numbers are calculated, and which files were read
 
-The tool can't write conclusions; those come from reading the reviewers' comments. Write your findings in a
-Markdown file and pass it with `--notes`, and they appear at the top of the report under **Findings**:
+Every chart and table lists languages in the same order: highest TER first.
+
+The figures, charts, caveats and form check are calculated directly from the data, without AI. The
+conclusions come from reading the reviewers' comments. Write your findings in a Markdown file and pass it
+with `--notes`, and they appear at the top of the report under **Findings**:
 
 ```bash
 python evaluate.py forms "data/Drop 2 forms" --title "Drop 2 review" --notes data/drop2_findings.md
 ```
 
 The notes file supports headings (`#`, `##`), paragraphs, bullet and numbered lists, `**bold**`, `*italic*`,
-`` `code` ``, `> quotes` and `[links](https://...)`. See `samples/findings_example.md`.
+`` `code` ``, `> quotes` and `[links](https://...)`. Three conventions link it to the rest of the report:
+
+- **`# Bottom line`**: one or two sentences, shown at the top of the report.
+- **`# Language assessments`**: lines like
+  `- **Japanese**: Not usable as-is (evidence: strong, 10 items). Reason.` fill the scorecard and each
+  language section. Use the language names exactly as the report shows them. Statuses are *Not usable
+  as-is*, *Needs targeted fixes*, *Usable with light edits*, *Good* or *Can't assess*.
+- **Theme headings** ending in `(Critical)`, `(Major)`, `(Minor)` or `(Decision needed)` get a coloured tag.
+
+After building the report, the tool prints `Findings check:` lines if the bottom line is missing, a
+language has no assessment, or an assessment's name doesn't match a language. See
+`samples/findings_example.md` for a complete example.
 
 ## Writing the findings with Claude
 
@@ -178,7 +203,9 @@ To keep conclusions consistent between drops:
 - **Compare with the last drop.** Give the previous drop's findings as well, and the new findings will say
   what changed.
 
-Read the findings before you share them. Have a linguist check any example where the exact meaning matters.
+AI can make mistakes. The report says so next to the findings (and next to the bottom line), but read the
+findings yourself before you share them, and have a linguist check any example where the exact meaning
+matters.
 Evaluation data is client content, so check that your agreement with the client allows it to be processed
 by the AI service you use.
 
@@ -188,6 +215,10 @@ by the AI service you use.
 column holds the source, raw AI, corrected text, category, severity and comment, and which cells hold the
 header fields. The defaults match the AI Human Evaluation Form. For another template, edit the file, or
 copy it and run with `--layout my_layout.json`.
+
+The same file has `language_overrides`, which replaces a language code after it is read. For example,
+`"ja-US": "ja"` shows a form named `..._JP_US.xlsm` as *Japanese* rather than *Japanese (US)*. Add an entry
+whenever a file name gives a language an odd label.
 
 ## How it's calculated
 
