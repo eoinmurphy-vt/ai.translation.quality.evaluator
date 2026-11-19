@@ -1,15 +1,17 @@
 """HTML report: one self-contained file that opens in any browser, with no internet connection needed.
 
 It holds everything that can be produced from the data: headline counts, edit-rate and effort charts with
-caveats, a scorecard, the severity and category breakdown and a form check (forms), reviewers' overall
-comments and every item with its changes highlighted. Written findings can be added from a Markdown file
+caveats, a scorecard, the severity and category breakdown and a form check (forms), placeholder checks,
+reviewers' overall comments and every item with its changes highlighted. Written findings can be added from a Markdown file
 (--notes). Their bottom line is shown at the top, and their language assessments fill the scorecard.
 """
 import html
+import os
 import re
 from datetime import datetime
 
 from . import __version__
+from .checks import status_label, summarise_checks, text_label
 from .stats import BANDS, band, pooled_char_rate, summarise
 from .text import diff_ops
 
@@ -27,11 +29,14 @@ AI_NOTE = ("<b>AI-assisted.</b> These findings were drafted with AI from the eva
            "act on them.")
 
 
+LEVEL_CLASS = {"Error": "critical", "Check": "warning", "Source issue": "src", "Note": "none"}
+
+
 def esc(value):
     return html.escape("" if value is None else str(value), quote=True)
 
 
-_PLACEHOLDER = re.compile(r"\{\{\s*[A-Za-z_][A-Za-z0-9_.]*\s*\}\}|1:[A-Za-z_][A-Za-z0-9_.]*")
+_PLACEHOLDER = re.compile(r"\{\{\s*[A-Za-z_][A-Za-z0-9_.]*\s*\}\}|1:[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
 
 
 def _text(value):
@@ -77,6 +82,14 @@ def _band_chip(ter, prefix=""):
     if b is None:
         return '<span class="status none"><i></i>Not measured</span>'
     return f'<span class="status {BAND_STATUS[b]}"><i></i>{prefix}{BAND_SHORT[b]}</span>'
+
+
+def _level_chip(level):
+    return f'<span class="status {LEVEL_CLASS.get(level, "none")}"><i></i>{esc(level)}</span>'
+
+
+def _n(n, word):
+    return f"{n} {word}{'' if n == 1 else 's'}"
 
 
 def _assessment_chip(a):
@@ -504,6 +517,102 @@ def _form_check(stats, forms, rows, levels):
             '<th>Form</th><th>Header fields</th><th class="num">Items</th><th>Items</th><th>Other notes</th>'
             f'<th>Content reviewed</th></tr></thead><tbody>{"".join(body)}</tbody></table></div>')
 
+# =============================================================== placeholder checks
+
+MAX_CHECK_LINES = 300
+_CHECK_ORDER = {"Error": 1, "Check": 2, "Source issue": 3, "Note": 4}
+
+
+def _checks_section(stats, rows, mode, rules_file):
+    per_lang = summarise_checks(rows)
+    per, t = per_lang["languages"], per_lang["total"]
+    unit = "item" if mode == "forms" else "segment"
+    final_word = "corrected text" if mode == "forms" else "final text"
+    rules = (f"Client rules from <code>{esc(os.path.basename(rules_file))}</code> also apply." if rules_file else
+             "No client rules file was found (<code>data/placeholder_rules.json</code>), so only the general checks "
+             "ran.")
+    scope = " On forms, only the logged items are checked; full exports would check every string." \
+        if mode == "forms" else ""
+    head = ('<div class="sec-head"><span class="eyebrow">Placeholder checks</span><h2>Placeholders, URLs, links and '
+            'tags</h2><p>Checked automatically, without AI: every placeholder, URL, link and tag in the source must '
+            f'appear unchanged in the translation. {rules}{scope}</p></div>')
+
+    entries = [(r, c) for r in rows for c in r.get("checks") or []]
+    if not t["with_placeholders"] and not entries:
+        return (f'{head}<p class="sub-lede">None of the {unit}s has placeholders, URLs, links or tags in the source, '
+                'so there was nothing to check.</p>')
+    lede = [f"<b>{t['with_placeholders']} of {_n(t['items'], unit)}</b> have placeholders, URLs, links or tags."]
+    if t["ai_errors"] == 1:
+        lede.append(f"The AI output has placeholder errors in <b>1 {unit}</b>, and "
+                    f"{'it was' if t['fixed'] else 'it was not'} fixed in review.")
+    elif t["ai_errors"]:
+        lede.append(f"The AI output has placeholder errors in <b>{t['ai_errors']} {unit}s</b>, and {t['fixed']} "
+                    f"of them {'was' if t['fixed'] == 1 else 'were'} fixed in review.")
+    else:
+        lede.append("The checks found no errors in the AI output.")
+    if t["left_in_final"]:
+        lede.append(f"<b>{_n(t['left_in_final'], unit)} still {'has' if t['left_in_final'] == 1 else 'have'} "
+                    f"errors in the {final_word}</b>: fix these before release.")
+    if t["source_issues"]:
+        lede.append(f"{_n(t['source_issues'], unit)} {'has a' if t['source_issues'] == 1 else 'have'} source "
+                    f"issue{'' if t['source_issues'] == 1 else 's'} to report to the client.")
+    if t["to_check"]:
+        lede.append(f"{_n(t['to_check'], unit)} {'needs' if t['to_check'] == 1 else 'need'} a person to check.")
+
+    def cell(n, warn=False):
+        return f'<td class="num{" miss" if warn and n else ""}">{n if n else "<span class=muted>0</span>"}</td>'
+
+    body = []
+    for lang in _ordered(stats):
+        s = per.get(lang)
+        if not s:
+            continue
+        body.append(f'<tr><th scope="row">{esc(lang)}</th>{cell(s["with_placeholders"])}{cell(s["ai_errors"], True)}'
+                    f'{cell(s["fixed"])}{cell(s["left_in_final"], True)}{cell(s["source_issues"])}'
+                    f'{cell(s["to_check"])}</tr>')
+    counts = ('<div class="tblwrap"><table class="pcount"><thead><tr><th>Language</th>'
+              f'<th class="num">With placeholders</th><th class="num">AI output errors</th>'
+              f'<th class="num">Fixed in review</th><th class="num">Left in {final_word.split()[0]}</th>'
+              f'<th class="num">Source issues</th><th class="num">To check</th></tr></thead>'
+              f'<tbody>{"".join(body)}</tbody></table></div>')
+
+    order = {lang: i for i, lang in enumerate(_ordered(stats))}
+    ref = lambda r: f'{r["file"]} · row {r["row"]}' if "row" in r else (r.get("key") or "")
+    grouped, lines = {}, []
+    for r, c in entries:
+        if c["level"] == "Source issue":       # the same source string is often logged for several languages
+            g = grouped.setdefault((c["message"], r.get("source", "")), [])
+            if not g:
+                lines.append(("source", c, g))
+            g.append(r)
+        else:
+            lines.append((r, c, None))
+
+    def rank(line):
+        r, c, g = line
+        first = g[0] if g else r
+        left = c["level"] == "Error" and c["status"] in ("Left in final", "Introduced in review")
+        return (0 if left else _CHECK_ORDER[c["level"]], order.get(first["language"], 99))
+
+    lines.sort(key=rank)
+    out = []
+    for r, c, g in lines[:MAX_CHECK_LINES]:
+        if g:
+            langs = list(dict.fromkeys(x["language"] for x in g))
+            who = f'{esc(_list_names(langs))}<span class="note">{esc("; ".join(ref(x) for x in g))}</span>'
+        else:
+            who = f'{esc(r["language"])}<span class="note">{esc(ref(r))}</span>'
+        out.append(f'<tr><th scope="row">{who}</th><td>{esc(text_label(c["text"], mode))}</td>'
+                   f'<td>{_level_chip(c["level"])}</td><td class="msg">{_text(c["message"])}</td>'
+                   f'<td>{esc(status_label(c["status"], mode))}</td></tr>')
+    more = (f'<p class="fine">Showing the first {MAX_CHECK_LINES} of {len(lines)} problems. The workbook\'s '
+            'Placeholder checks sheet lists them all.</p>') if len(lines) > MAX_CHECK_LINES else ""
+    problems = ('<h3 class="ptitle">Problems found</h3><div class="tblwrap"><table class="plist"><thead><tr>'
+                '<th>Where</th><th>Text</th><th>Level</th><th>Problem</th><th>Status</th></tr></thead>'
+                f'<tbody>{"".join(out)}</tbody></table></div>{more}') if out else \
+        '<p class="muted">No problems found.</p>'
+    return f'{head}<p class="sub-lede">{" ".join(lede)}</p>{counts}{problems}'
+
 # =============================================================== detail
 
 
@@ -531,6 +640,12 @@ def _item_card(r, levels, final_label):
         body.append(f'<dt>Reviewer</dt><dd class="cmt">{_text(r["comment"])}</dd>')
     if r.get("notes"):
         body.append(f'<dt>Note</dt><dd class="cmt muted">{esc("; ".join(r["notes"]))}</dd>')
+    if r.get("checks"):
+        mode = "forms" if final_label == "Corrected" else "pairs"
+        lines = "".join(f'<li>{_level_chip(c["level"])} <span class="muted">{esc(text_label(c["text"], mode))}:</span> '
+                        f'{_text(c["message"])} <span class="muted">({esc(status_label(c["status"], mode))})</span></li>'
+                        for c in r["checks"])
+        body.append(f'<dt>Checks</dt><dd class="pchk"><ul>{lines}</ul></dd>')
     return f'<article class="item"><header>{"".join(head)}</header><dl>{"".join(body)}</dl></article>'
 
 
@@ -607,6 +722,14 @@ edits, not their importance: fixing a wrong amount counts the same as fixing a c
 reviewers' severity ratings and comments.</p>"""
 
 
+CHECKS_METHOD = """<p><b>Placeholder checks</b> compare every placeholder, URL, link and HTML tag in the source with
+the AI output and the final text. <code>{{name}}</code>, <code>1:name</code> and <code>[%1$s:name]</code> count as
+the same placeholder. Client rules from a rules file add checks such as no preposition before a placeholder that
+already includes one. <i>Error</i> is definitely wrong; <i>Check</i> needs a person to confirm (a changed link, a
+missing tag, or a rule that depends on the word); <i>Source issue</i> is a problem in the source to report to the
+client. The checks follow fixed rules, without AI.</p>"""
+
+
 def _stats_line_forms(rows, levels, n_forms):
     parts = [f"<span><b>{len(rows)}</b> items logged</span>"]
     for lvl in levels:
@@ -638,10 +761,13 @@ def _stats_line_pairs(rows, stats):
     return "".join(parts)
 
 
-def build_report(rows, mode, inputs, title=None, notes=None, forms=None, severity_levels=None, ai_note=True):
+def build_report(rows, mode, inputs, title=None, notes=None, forms=None, severity_levels=None, ai_note=True,
+                 rules_file=None):
     """Full HTML page as a string. mode is 'forms' or 'pairs'.
 
     ai_note: show the 'AI can make mistakes' note with the findings (turn off when a person wrote them).
+    rules_file: the placeholder rules file used, if any (the placeholder checks themselves are in each
+    row's "checks"; the section is shown when they were run).
     """
     levels = list(severity_levels or [])
     stats, groups = summarise(rows), _by_language(rows)
@@ -658,6 +784,12 @@ def build_report(rows, mode, inputs, title=None, notes=None, forms=None, severit
         eyebrow = f"Raw AI vs final · {n_lang} language{'s' if n_lang != 1 else ''} · {created:%d %b %Y}"
         lede = "The raw AI output compared with the final, reviewed text, segment by segment."
         stats_line = _stats_line_pairs(rows, stats)
+    has_checks = any("checks" in r for r in rows)
+    if has_checks:
+        t = summarise_checks(rows)["total"]
+        if t["ai_errors"]:
+            stats_line += (f'<span><b>{t["ai_errors"]}</b> {"item" if mode == "forms" else "segment"}'
+                           f'{"" if t["ai_errors"] == 1 else "s"} with placeholder errors in the AI output</span>')
     bottom_html = ""
     if bottom_line:
         source = ("From the findings below, drafted with AI. AI can make mistakes." if ai_note
@@ -702,6 +834,9 @@ def build_report(rows, mode, inputs, title=None, notes=None, forms=None, severit
             '<h2>How segments split by amount of editing</h2><p>Each bar is one language\'s measured segments, '
             'split by their TER. The number at the end is the segment count.</p></div>'
             f'<div class="panel">{_effort_bars(stats)}</div></section>')
+    if has_checks:
+        toc.append(("placeholders", "Placeholders"))
+        sections.append(f'<section id="placeholders">{_checks_section(stats, rows, mode, rules_file)}</section>')
     toc.append(("detail", "Detail"))
     sections.append('<section id="detail"><div class="sec-head"><span class="eyebrow">Detail</span>'
                     f'<h2>{"Every logged item" if mode == "forms" else "Edited segments"}, by language</h2>'
@@ -721,7 +856,8 @@ def build_report(rows, mode, inputs, title=None, notes=None, forms=None, severit
                            "in the tool's repository, and checked against the data. AI can make mistakes, so check "
                            "the findings before you rely on them.</p>")
     sections.append('<section id="method"><div class="sec-head"><span class="eyebrow">Method</span>'
-                    f'<h2>How the numbers were calculated</h2></div><div class="method">{METHOD}{findings_method}'
+                    f'<h2>How the numbers were calculated</h2></div><div class="method">{METHOD}'
+                    f'{CHECKS_METHOD if has_checks else ""}{findings_method}'
                     f'<p><b>Inputs</b></p><ul>{inputs_html}</ul><p class="muted">Created {created:%d %b %Y %H:%M} '
                     f'by ai.translation.quality.evaluator v{__version__}.</p></div></section>')
 
@@ -802,7 +938,7 @@ header.top{display:grid;gap:14px}.lede{color:var(--ink-2);font-size:1.04rem;max-
 .sev.decide i{background:var(--accent);border-radius:2px;transform:rotate(45deg);width:8px;height:8px}
 .sev.tag{font-size:.74rem;padding:1px 9px 1px 7px;border:1px solid var(--line-2);border-radius:999px;background:var(--bg);color:var(--ink-2)}
 .status.good i{background:var(--good)}.status.warning i{background:var(--warning)}.status.serious i{background:var(--serious)}
-.status.critical i{background:var(--critical)}.status.none i{border:2px solid var(--sx)}
+.status.critical i{background:var(--critical)}.status.none i{border:2px solid var(--sx)}.status.src i{background:var(--accent);border-radius:2px}
 .mini{display:inline-block;min-width:22px;padding:0 6px;border-radius:4px;font:600 .74rem/1.6 var(--f-mono);text-align:center}
 .mini.s0{background:var(--s0);color:var(--on-s0)}.mini.s1{background:var(--s1);color:var(--on-s1)}.mini.s2{background:var(--s2);color:var(--on-s2)}
 .mini.sx{background:var(--sx);color:var(--on-sx)}.mini.sn{background:var(--sn);color:var(--on-sn)}
@@ -854,6 +990,10 @@ table.heat td.h1{background:var(--h1);color:var(--h1-ink)}table.heat td.h2{backg
 table.heat td.h3{background:var(--h3);color:var(--h3-ink)}table.heat td.h4{background:var(--h4);color:var(--h4-ink)}
 table.heat td.tot,table.heat tfoot td{background:none;color:var(--ink)}
 table.heat tfoot th,table.heat tfoot td{border-top:1px solid var(--line-2);border-bottom:0;font-weight:600}
+table.pcount{min-width:640px}table.pcount td.miss{color:var(--miss);font-weight:600}
+table.plist{min-width:720px}table.plist td.msg{min-width:280px;overflow-wrap:anywhere}table.plist th[scope=row]{min-width:150px}
+.ptitle{margin:20px 0 10px}.item dd.pchk ul{margin:0;padding:0;list-style:none;display:grid;gap:4px;font-size:.86rem}
+.item dd.pchk .status{margin-right:4px}
 .ph{font:.84em var(--f-mono);background:var(--ph-bg);color:var(--ph-ink);border-radius:4px;padding:0 4px;overflow-wrap:anywhere}
 del{background:var(--del-bg);color:var(--del-ink);text-decoration:line-through;text-decoration-thickness:1px;border-radius:3px;padding:0 1px}
 ins{background:var(--ins-bg);color:var(--ins-ink);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px;border-radius:3px;padding:0 1px}

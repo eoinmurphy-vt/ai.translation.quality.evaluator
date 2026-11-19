@@ -1,4 +1,4 @@
-"""Excel workbook output: About, Summary, Segments (and Forms for evaluation forms).
+"""Excel workbook output: About, Summary, Segments, Placeholder checks (and Forms for evaluation forms).
 
 Edit counts are written as values. Edits, TER, character edit rate and every Summary figure
 are Excel formulas over those values, so each number can be traced and re-checked in Excel.
@@ -12,6 +12,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from . import __version__
+from .checks import row_counts, status_label, text_label
 from .text import diff_ops
 
 FONT = "Arial"
@@ -115,6 +116,69 @@ CHAR_COLUMNS = [
 ]
 
 
+CHECK_COLUMNS = [
+    ("ph_raw", "Placeholder errors (raw AI)", 10, "int"), ("ph_left", "Placeholder errors left", 10, "int"),
+    ("ph_src", "Source issues", 8, "int"),
+]
+
+
+def _check_values(row):
+    if "checks" not in row:
+        return {}
+    raw, left, src = row_counts(row)
+    return {"ph_raw": raw, "ph_left": left, "ph_src": src}
+
+
+def _check_summary_columns(final_word, unit):
+    return [("ph_raw", f"{unit} with placeholder errors (raw AI)", 12, "int"),
+            ("ph_left", f"{unit} with placeholder errors left in {final_word}", 13, "int"),
+            ("ph_src", f"{unit} with source issues", 10, "int")]
+
+
+def _check_summary_values(seg_rng, a):
+    return {cid: f'=COUNTIFS({seg_rng("language")},{a},{seg_rng(cid)},">0")' for cid in ("ph_raw", "ph_left", "ph_src")}
+
+
+def _checks_sheet(wb, rows, mode):
+    """One line per problem the placeholder checks found (only when the checks were run)."""
+    if not any("checks" in x for x in rows):
+        return
+    ws = wb.create_sheet("Placeholder checks")
+    final_label = "Corrected" if mode == "forms" else "Final"
+    cols = [("language", "Language", 16, "text")]
+    if mode == "forms":
+        cols += [("file", "Form file", 24, "wrap"), ("row", "Form row", 7, "int"), ("task", "Task / key", 18, "wrap")]
+    else:
+        cols += [("key", "Key", 28, "wrap")]
+    cols += [("text", "Text checked", 11, "text"), ("level", "Level", 11, "text"), ("check", "Check", 15, "wrap"),
+             ("message", "Problem", 52, "wrap"), ("status", "Status", 16, "wrap"), ("source", "Source", 34, "wrap"),
+             ("raw", "Raw AI", 34, "wrap"), ("final", final_label, 34, "wrap")]
+    records = []
+    for x in rows:
+        for c in x.get("checks") or []:
+            records.append({"language": x["language"], "file": x.get("file", ""), "row": x.get("row", ""),
+                            "task": x.get("key") or x.get("task", ""), "key": x.get("key", ""),
+                            "text": text_label(c["text"], mode), "level": c["level"], "check": c["check"],
+                            "message": c["message"], "status": status_label(c["status"], mode),
+                            "source": x.get("source", ""), "raw": x.get("raw", ""), "final": x.get("final", "")})
+    if not records:
+        records.append({"message": "No placeholder, URL, link or tag problems were found."})
+    _write_table(ws, cols, records)
+
+
+CHECKS_ABOUT = [
+    ("h", "Placeholder checks"),
+    ("p", "Every placeholder, URL, link and HTML tag in the source must appear unchanged in the raw AI output and "
+          "in the final text. {{name}}, 1:name and [%1$s:name] count as the same placeholder. When a placeholder "
+          "rules file is used (data/placeholder_rules.json), its client rules also apply, for example no "
+          "preposition before a placeholder that already includes one. No AI is involved."),
+    ("p", "Levels: Error is definitely wrong; Check needs a person to confirm (a changed link, a missing tag); "
+          "Source issue is a problem in the source to report to the client; Note is an allowed change."),
+    ("p", "Status: Fixed in review, Left in final (still wrong after review), Introduced in review, Report to "
+          "client. The Summary counts each item or segment once."),
+]
+
+
 def _rng(sheet, letter, last):
     return f"{sheet}!${letter}$2:${letter}${max(last, 2)}"
 
@@ -203,14 +267,15 @@ def write_forms_workbook(forms, rows, path, severity_levels, inputs):
         ("final", "Corrected", 38, "wrap"), ("changes", "Changes (raw to corrected)", 42, "rich"),
         ("severity", "Severity", 10, "text"), ("category", "Category", 15, "wrap"),
         ("comment", "Reviewer comment", 42, "wrap"),
-    ] + METRIC_COLUMNS + CHAR_COLUMNS
+    ] + METRIC_COLUMNS + CHAR_COLUMNS + CHECK_COLUMNS
     columns = [(c[0], c[1].replace("Tokens in final", "Tokens in corrected").replace("Chars in final", "Chars in corrected"),
                 c[2], c[3]) for c in columns]
     records = []
     for x in rows:
         rec = {"language": x["language"], "file": x["file"], "row": x["row"], "task": x["key"] or x["task"],
                "source": x["source"], "raw": x["raw"], "final": x["final"], "severity": x["severity"],
-               "category": x["category"], "comment": x["comment"], "unit": x["unit"], "notes": "; ".join(x["notes"])}
+               "category": x["category"], "comment": x["comment"], "unit": x["unit"], "notes": "; ".join(x["notes"]),
+               **_check_values(x)}
         if x["metrics"]:
             rec["changes"] = _changes_cell(x["raw_measured"], x["final"], x["unit"])
             rec.update(_metric_values(x["metrics"]))
@@ -231,6 +296,7 @@ def write_forms_workbook(forms, rows, path, severity_levels, inputs):
         frecs.append(rec)
     FL = _write_table(fsheet, fcols, frecs)
     flast = fsheet.max_row
+    _checks_sheet(wb, rows, "forms")
 
     summ = wb.create_sheet("Summary", 0)
     scols = ([("language", "Language", 22, "text"), ("unit", "Unit", 7, "text"), ("forms", "Forms", 7, "int"),
@@ -239,7 +305,8 @@ def write_forms_workbook(forms, rows, path, severity_levels, inputs):
              + [("sev_other", "Other / no severity", 10, "int"), ("measured", "Segments measured", 10, "int"),
                 ("edits", "Edits", 8, "int"), ("ref", "Tokens in corrected", 11, "int"),
                 ("ter", "TER (logged segments)", 12, "pct"), ("char_edits", "Char edits", 9, "int"),
-                ("ref_chars", "Chars in corrected", 11, "int"), ("char_rate", "Char edit rate", 10, "pct")])
+                ("ref_chars", "Chars in corrected", 11, "int"), ("char_rate", "Char edit rate", 10, "pct")]
+             + _check_summary_columns("corrected", "Items"))
     S = {cid: get_column_letter(i + 1) for i, (cid, *_r) in enumerate(scols)}
     seg_rng = lambda cid: _rng("Segments", L[cid], last)
     summ.append([c[1] for c in scols])
@@ -261,12 +328,13 @@ def write_forms_workbook(forms, rows, path, severity_levels, inputs):
             "char_edits": f"=SUMIFS({seg_rng('char_edits')},{seg_rng('language')},{a})",
             "ref_chars": f"=SUMIFS({seg_rng('ref_chars')},{seg_rng('language')},{a})",
             "char_rate": f'=IF({S["ref_chars"]}{r}>0,{S["char_edits"]}{r}/{S["ref_chars"]}{r},"")',
+            **_check_summary_values(seg_rng, a),
         })
         summ.append([values.get(cid, "") for cid, *_ in scols])
     first, lastl = 2, summ.max_row
     t = lastl + 1
     total = {"language": "All languages", "unit": "mixed" if len({u for _, u in langs}) > 1 else langs[0][1]}
-    for cid in ["forms", "items", "sev_other", "measured", "char_edits", "ref_chars"] + [f"sev{i}" for i in range(len(severity_levels))]:
+    for cid in ["forms", "items", "sev_other", "measured", "char_edits", "ref_chars", "ph_raw", "ph_left", "ph_src"] + [f"sev{i}" for i in range(len(severity_levels))]:
         total[cid] = f"=SUM({S[cid]}{first}:{S[cid]}{lastl})"
     if total["unit"] == "mixed":
         total.update({"edits": "", "ref": "", "ter": "n/a (mixed units)"})
@@ -286,7 +354,8 @@ def write_forms_workbook(forms, rows, path, severity_levels, inputs):
         ("p", "Segments: every item logged on the forms, with raw AI text, corrected text, the changes between "
               "them and their edit counts. Items without both texts (general comments) are listed but not measured."),
         ("p", "Forms: the header details of each form (team, project, word count, overall comment)."),
-    ], inputs)
+        ("p", "Placeholder checks: every placeholder, URL, link or tag problem found in the logged items."),
+    ] + CHECKS_ABOUT, inputs)
     _save(wb, path)
 
 # =============================================================== export comparison
@@ -299,11 +368,11 @@ def write_pairs_workbook(rows, path, inputs):
     columns = ([("language", "Language", 16, "text"), ("key", "Key", 30, "wrap"), ("source", "Source", 38, "wrap"),
                 ("raw", "Raw AI", 38, "wrap"), ("final", "Final", 38, "wrap"),
                 ("changes", "Changes (raw to final)", 42, "rich")]
-               + METRIC_COLUMNS + [("changed", "Changed?", 9, "text")] + CHAR_COLUMNS)
+               + METRIC_COLUMNS + [("changed", "Changed?", 9, "text")] + CHAR_COLUMNS + CHECK_COLUMNS)
     records = []
     for x in rows:
         rec = {"language": x["language"], "key": x["key"], "source": x["source"], "raw": x["raw"],
-               "final": x["final"], "unit": x["unit"], "notes": "; ".join(x["notes"])}
+               "final": x["final"], "unit": x["unit"], "notes": "; ".join(x["notes"]), **_check_values(x)}
         if x["metrics"]:
             if x["metrics"]["edits"]:
                 rec["changes"] = _changes_cell(x["raw"], x["final"], x["unit"])
@@ -312,6 +381,7 @@ def write_pairs_workbook(rows, path, inputs):
     L = _write_table(seg, columns, records)
     last = seg.max_row
     seg_rng = lambda cid: _rng("Segments", L[cid], last)
+    _checks_sheet(wb, rows, "pairs")
 
     summ = wb.create_sheet("Summary", 0)
     scols = [("language", "Language", 22, "text"), ("unit", "Unit", 7, "text"), ("segments", "Segments", 9, "int"),
@@ -319,7 +389,7 @@ def write_pairs_workbook(rows, path, inputs):
              ("pct_unchanged", "% unchanged", 10, "pct"), ("edits", "Edits", 9, "int"),
              ("ref", "Tokens in final", 10, "int"), ("ter", "TER (job level)", 11, "pct"),
              ("char_edits", "Char edits", 9, "int"), ("ref_chars", "Chars in final", 10, "int"),
-             ("char_rate", "Char edit rate", 10, "pct")]
+             ("char_rate", "Char edit rate", 10, "pct")] + _check_summary_columns("final", "Segments")
     S = {cid: get_column_letter(i + 1) for i, (cid, *_r) in enumerate(scols)}
     summ.append([c[1] for c in scols])
     langs = _languages(rows)
@@ -338,13 +408,14 @@ def write_pairs_workbook(rows, path, inputs):
             "char_edits": f"=SUMIFS({seg_rng('char_edits')},{seg_rng('language')},{a})",
             "ref_chars": f"=SUMIFS({seg_rng('ref_chars')},{seg_rng('language')},{a})",
             "char_rate": f'=IF({S["ref_chars"]}{r}>0,{S["char_edits"]}{r}/{S["ref_chars"]}{r},"")',
+            **_check_summary_values(seg_rng, a),
         }
         summ.append([values.get(cid, "") for cid, *_ in scols])
     first, lastl = 2, summ.max_row
     t = lastl + 1
     mixed = len({u for _, u in langs}) > 1
     total = {"language": "All languages", "unit": "mixed" if mixed else langs[0][1]}
-    for cid in ("segments", "measured", "unchanged", "char_edits", "ref_chars"):
+    for cid in ("segments", "measured", "unchanged", "char_edits", "ref_chars", "ph_raw", "ph_left", "ph_src"):
         total[cid] = f"=SUM({S[cid]}{first}:{S[cid]}{lastl})"
     total["pct_unchanged"] = f'=IF({S["measured"]}{t}>0,{S["unchanged"]}{t}/{S["measured"]}{t},"")'
     if mixed:
@@ -362,5 +433,6 @@ def write_pairs_workbook(rows, path, inputs):
     _about(wb, "AI Translation Quality Evaluation: raw AI vs final", [
         ("p", "Summary: job-level TER per language and the share of segments left unchanged."),
         ("p", "Segments: every key, with source, raw AI and final text, the changes between them and edit counts."),
-    ], inputs)
+        ("p", "Placeholder checks: every placeholder, URL, link or tag problem found."),
+    ] + CHECKS_ABOUT, inputs)
     _save(wb, path)

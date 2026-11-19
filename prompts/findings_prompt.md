@@ -56,12 +56,22 @@ won't check them against the data, so every figure and example has to be exactly
   - `unit`
   - `metrics`: `added`, `removed`, `replaced`, `moves`, `edits`, `ref_len`, `ter`, `char_edits`,
     `ref_chars` and `char_rate`. Null when there was no text to compare.
+  - `placeholders`: the placeholders, URLs, links and tags in the source.
+  - `checks`: the tool's placeholder checks for this row. Each has `text` (`raw`, `final` or `source`),
+    `level`, `check`, `message` and `status`. Levels: `Error` is definitely wrong (a placeholder missing,
+    added, renamed or broken; a URL path changed; a word before a placeholder that already includes it);
+    `Check` needs a person to confirm (a changed link, a missing tag, a rule that depends on the word);
+    `Source issue` is a problem in the source to report to the client; `Note` is an allowed change.
+    Status: `Fixed in review`, `Left in final`, `Introduced in review`, `Report to client`.
 - `forms` (forms mode): each form's `language`, `language_entered`, `team`, `project`, `word_count` and
   `overall_comment`.
+- `placeholder_checks`: the placeholder check counts per language and in total (`with_placeholders`,
+  `ai_errors`, `fixed`, `left_in_final`, `source_issues`, `to_check`, each counting items once), and the
+  `rules_file` used, if any.
 - `severity_levels` and `inputs`.
 
-**Client context file** (optional): product names, glossary terms, do-not-translate rules, style guide
-points, decisions already made, and who owns what. Where it covers something, it overrides your own
+**Client context file** (optional): product names, glossary terms, do-not-translate rules, placeholder
+rules, style guide points, decisions already made, and who owns what. Where it covers something, it overrides your own
 assumptions.
 
 **Previous findings** (optional): the last drop's findings, for comparison.
@@ -113,6 +123,7 @@ For each form or language, list:
 - how severity was used
 - rows that weren't measured, and why (general comments, process issues)
 - rows the tool flagged in `notes` (for example, two AI outputs in one cell)
+- rows with placeholder `checks`, and whether a client rules file was used
 
 Check whether all languages reviewed the same content: compare `task` and `project`, and look for the same
 source text across languages. In `compare` mode, note any keys missing from one export. These points go in
@@ -128,12 +139,19 @@ Per language, and in total:
 
 In `compare` mode, also give the share of segments left unchanged. Note the outliers.
 
+From `placeholder_checks`, per language: items with placeholder errors in the AI output, how many were
+fixed in review, and how many are left in the final text. These checks follow fixed rules, so they are
+exact. In `forms` mode they cover only the logged items.
+
 ### 3. Classify every row by root cause
 
 Use these families, and add one if the data needs it:
 
 - **Placeholders, variables and tags:** a placeholder misunderstood (an amount plus currency code read as a
-  count of items), moved away from its number, dropped or translated; tags broken.
+  count of items), moved away from its number, dropped or translated; words added around a placeholder
+  that already includes them (a preposition before a "to" phrase, a unit around a duration); tags broken.
+  The row's `checks` find many of these. Words a placeholder already includes are only flagged when the
+  rules file covers them, so read the context file for the others.
 - **Product names and terminology:** product or feature names translated or turned into generic terms;
   glossary terms not used; the glossary missing or empty.
 - **Missing context:** the type of UI element (tooltip, button, alt text, heading, list bullet), the page,
@@ -141,7 +159,8 @@ Use these families, and add one if the data needs it:
 - **Misread source:** meaning errors with no setup cause.
 - **Consistency and TM:** the same or near-identical source translated differently within a task;
   near-exact TM matches not reused.
-- **Do-not-translate and functional risk:** URLs, code, keys, brand names or variables translated.
+- **Do-not-translate and functional risk:** URLs, code, keys, brand names or variables translated. A
+  check with `check` "URL path" or "Link" belongs here.
 - **Style and fluency:** literal translation, wrong register (formal or informal), flat marketing copy, weak
   headlines, taglines and calls to action.
 - **Language mechanics:** grammar, punctuation, locale formats.
@@ -230,6 +249,10 @@ List the places where:
 
 Phrase each one as a decision for the client, with your recommendation and the reason for it.
 
+Checks with level `Source issue` are problems in the source, not in the translation. Don't count them
+against a language. List them once (the same source string is often logged for several languages) as an
+action for the client, or as a decision if fixing the source needs the client's choice.
+
 If a contested item is big enough to be a theme, give the evidence there, and keep its line under
 "Decisions needed" to the question, a pointer to the theme ("see theme 5") and your recommendation.
 Don't repeat the evidence.
@@ -283,6 +306,7 @@ small samples, call a change a signal, not a trend.
 - Every theme names its languages.
 - No claim about a language lacks a row or comment to support it.
 - In `forms` mode, no TER is described as job-level.
+- Every `Error` check left in the final text is mentioned, as a release risk.
 
 ## Output format
 

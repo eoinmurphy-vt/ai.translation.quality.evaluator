@@ -1,0 +1,41 @@
+{
+  "_about": "Example placeholder rules, with invented placeholder names. Copy this file to data/placeholder_rules.json (git ignores data/) and change it for your client. The tool reads data/placeholder_rules.json automatically, or the file given with --rules. Keys starting with _ are comments.",
+  "_fields": {
+    "placeholders": "Regular expression matched against the placeholder name (the part inside {{ }}).",
+    "includes": "What the placeholder's value already contains, used in the messages.",
+    "level": "Error (definitely wrong) or Check (a person should confirm).",
+    "not_before": "Per language code (de, fr, pt-BR, ...): words that must not come right before the placeholder. The source_language list is used to check the source.",
+    "no_suffix_after": "Language codes where letters stuck right after the placeholder are wrong (for example Turkish case endings).",
+    "replaces": "Optional regular expression: a placeholder matching 'placeholders' may stand in for one matching this, with the same prefix (from {{trip.destination.name}} to {{trip.destination.toPhrase}}). This is reported as a Note, not an error.",
+    "check_source": "true (default) to check the source too, reported as a Source issue for the client.",
+    "message, suffix_message, source_message": "Optional wording. {word}, {placeholder} and {includes} are filled in."
+  },
+  "source_language": "en",
+  "rules": [
+    {
+      "id": "includes-preposition",
+      "_about": "Example: {{trip.destination.toPhrase}} becomes 'to France' in English and 'nach Frankreich' in German, so a preposition or article typed before it is doubled.",
+      "placeholders": "(?i)\\.(to|from|in)Phrase$",
+      "includes": "its preposition",
+      "level": "Error",
+      "replaces": "(?i)\\.name$",
+      "not_before": {
+        "en": ["to", "from", "in", "into", "the"],
+        "de": ["nach", "aus", "in", "im", "ins", "von", "vom", "zu", "zum", "zur", "der", "die", "das", "den", "dem", "des"],
+        "fr": ["à", "a", "au", "aux", "en", "de", "d'", "du", "des", "le", "la", "les", "l'"],
+        "es": ["a", "al", "de", "del", "desde", "en", "hacia", "para", "el", "la", "los", "las"]
+      },
+      "no_suffix_after": ["tr"]
+    },
+    {
+      "id": "includes-article",
+      "_about": "Example: {{trip.destination.withArticle}} becomes 'the Netherlands', so 'the' before it is doubled.",
+      "placeholders": "(?i)\\.withArticle$",
+      "includes": "its article",
+      "level": "Error",
+      "not_before": {
+        "en": ["the"]
+      }
+    }
+  ]
+}

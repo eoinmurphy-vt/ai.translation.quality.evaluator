@@ -18,7 +18,9 @@ Ask for the forms folder (or the raw and final exports) and the drop name if you
 ## Steps
 
 1. **Collect context.** In `data/`, look for a client context file (`*context*.md`) and the previous drop's
-   findings (`*findings*.md`), and use them if they exist. Tell the user which ones you used.
+   findings (`*findings*.md`), and use them if they exist. The tool reads the client's placeholder rules
+   from `data/placeholder_rules.json` by itself. Tell the user which of these files you used, and if there's
+   no rules file, say that only the general placeholder checks ran.
 
 2. **Run the tool** from the repository root:
 
@@ -49,8 +51,8 @@ Ask for the forms folder (or the raw and final exports) and the drop name if you
    The HTML report is written next to the workbook, as `output/<drop>.html`.
 
 6. **Check it.**
-   - Compare each figure in the findings with the JSON (per-language totals and severity counts), and each
-     theme count with your per-row theme list.
+   - Compare each figure in the findings with the JSON (per-language totals, severity counts and
+     `placeholder_checks`), and each theme count with your per-row theme list.
    - Check that every quoted example appears exactly in the JSON.
    - Read the `Findings check:` lines the tool prints in step 5. They catch a missing bottom line, a language
      without an assessment, or an assessment whose name doesn't match the data (the scorecard reads those
@@ -61,6 +63,7 @@ Ask for the forms folder (or the raw and final exports) and the drop name if you
    - where the HTML report, workbook and findings are
    - the top three findings
    - the decisions the client needs to make
+   - any placeholder errors left in the final text, and source issues to report to the client
    - anything you were unsure of, such as a back-translation you couldn't confirm. Suggest a linguist
      checks those before the report is shared.
 

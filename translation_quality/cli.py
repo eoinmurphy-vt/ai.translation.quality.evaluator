@@ -6,6 +6,7 @@ import sys
 from datetime import datetime
 
 from . import __version__
+from .checks import default_rules_file, load_rules, run_checks, summarise_checks
 from .readers import InputError, compare_exports, load_layout, read_forms, read_pairs_table
 from .stats import summarise
 from .ter import ter
@@ -62,6 +63,26 @@ def _missing_notes_message(path):
             f"{found}")
 
 
+def _shown_path(path):
+    try:
+        return os.path.relpath(path)
+    except ValueError:  # on another drive (Windows)
+        return path
+
+
+def _print_checks(checks, mode, rules_file):
+    t = checks["total"]
+    unit = "items" if mode == "forms" else "segments"
+    final = "corrected text" if mode == "forms" else "final text"
+    rules = f"client rules from {_shown_path(rules_file)}" if rules_file else \
+        "no client rules (data/placeholder_rules.json not found)"
+    print(f"\nPlaceholder checks ({rules}):")
+    print(f"  {t['with_placeholders']} of {t['items']} {unit} have placeholders, URLs, links or tags")
+    print(f"  {t['ai_errors']} with errors in the AI output ({t['fixed']} fixed in review); "
+          f"{t['left_in_final']} with errors left in the {final}")
+    print(f"  {t['source_issues']} with source issues to report; {t['to_check']} to check")
+
+
 def _write_json(path, rows, summary, extra=None):
     payload = {"tool_version": __version__, "summary": summary, "rows": rows, **(extra or {})}
     with open(path, "w", encoding="utf-8") as fh:
@@ -102,6 +123,8 @@ def build_parser():
         sp.add_argument("--no-ai-note", action="store_true",
                         help="don't show the 'drafted with AI, AI can make mistakes' note with the findings "
                              "(use only when a person wrote them)")
+        sp.add_argument("--rules", metavar="FILE",
+                        help="client placeholder rules (default: data/placeholder_rules.json, if it exists)")
 
     f = sub.add_parser("forms", help="evaluation forms with logged issues (.xlsx/.xlsm)",
                        description="Read AI Human Evaluation Forms and measure every logged segment.")
@@ -156,31 +179,38 @@ def main(argv=None):
             print(f"\nError: can't read the notes file {args.notes}: {exc}", file=sys.stderr)
             return 2
     levels, forms = [], None
+    rules_file = args.rules or default_rules_file(REPO_ROOT)
     try:
+        rules = load_rules(rules_file)
+        with_rules = lambda items: list(items) + ([f"placeholder rules: {_shown_path(rules_file)}"] if rules_file else [])
         if args.mode == "forms":
             layout = load_layout(args.layout)
             print("Reading evaluation forms:")
             forms, rows = read_forms(args.paths, layout)
+            run_checks(rows, rules)
             levels = layout["severity_levels"]
-            inputs = args.paths
+            inputs = with_rules(args.paths)
             write_forms_workbook(forms, rows, out, levels, inputs)
             extra = {"forms": forms}
             label = "Items"
         elif args.mode == "compare":
             rows = compare_exports(args.raw, args.final, args.lang, args.source, args.unit,
                                    args.text_column, args.source_column)
-            inputs = [f"raw: {args.raw}", f"final: {args.final}", f"language: {args.lang}"]
+            run_checks(rows, rules)
+            inputs = with_rules([f"raw: {args.raw}", f"final: {args.final}", f"language: {args.lang}"])
             write_pairs_workbook(rows, out, inputs)
             extra, label = {}, "Keys"
         else:
             rows = read_pairs_table(args.table, args.sheet)
-            inputs = [args.table]
+            run_checks(rows, rules)
+            inputs = with_rules([args.table])
             write_pairs_workbook(rows, out, inputs)
             extra, label = {}, "Rows"
         if want_html:
             from .html_report import build_report, write_report
             page = build_report(rows, "forms" if args.mode == "forms" else "pairs", inputs, title=args.title,
-                                notes=notes, forms=forms, severity_levels=levels, ai_note=not args.no_ai_note)
+                                notes=notes, forms=forms, severity_levels=levels, ai_note=not args.no_ai_note,
+                                rules_file=rules_file)
             write_report(html_out, page)
     except InputError as exc:
         print(f"\nError: {exc}", file=sys.stderr)
@@ -190,9 +220,12 @@ def main(argv=None):
         return 2
     summary = summarise(rows)
     _print_summary(summary, label)
+    checks = {"rules_file": _shown_path(rules_file) if rules_file else None, **summarise_checks(rows)}
+    _print_checks(checks, args.mode, rules_file)
     if args.json:
         _write_json(args.json, rows, summary, {**extra, "mode": args.mode, "inputs": inputs,
-                                               "severity_levels": levels, "created": datetime.now().isoformat(timespec="minutes")})
+                                               "severity_levels": levels, "placeholder_checks": checks,
+                                               "created": datetime.now().isoformat(timespec="minutes")})
         print(f"\nJSON written to {args.json}")
     print(f"\nWorkbook written to {out}")
     if want_html:

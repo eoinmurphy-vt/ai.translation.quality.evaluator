@@ -10,6 +10,8 @@ and keeps the reviewers' severity and category ratings alongside it.
 - Reads JSON, CSV, Excel and XLIFF exports, and treats placeholders such as `{{name}}`, `%s` and HTML tags
   as single units
 - Measures Japanese, Chinese and Thai per character, because they don't put spaces between words
+- Checks that every placeholder, URL, link and tag in the source survives translation, plus your client's
+  own placeholder rules (for example, no preposition before a placeholder that already includes one)
 - Shows every change in Excel: removed text in red strikethrough, added text in green underline
 - Writes every rate as an Excel formula, so anyone can check the numbers
 - Optionally writes an HTML report to share: charts, a scorecard, reviewer comments, every item with its
@@ -107,6 +109,7 @@ don't matter):
 | `--notes FILE` | Markdown file with your written findings, shown at the top of the HTML report |
 | `--no-ai-note` | Hide the "drafted with AI, AI can make mistakes" note. Use only when a person wrote the findings |
 | `--json FILE` | Also save all results as JSON, for dashboards or further processing |
+| `--rules FILE` | Client placeholder rules (default: `data/placeholder_rules.json`, if it exists). See [Placeholder checks](#placeholder-checks) |
 
 `--html-output`, `--title` and `--notes` each turn on the HTML report, so `--html` isn't needed with them.
 
@@ -119,7 +122,11 @@ don't matter):
 | **Summary** | One row per language: segments, severity counts (forms), unchanged segments (exports), TER and character edit rate, plus a total row |
 | **Segments** | Every segment: source, raw AI, final text, the changes highlighted, reviewer rating and comment (forms), and the edit counts |
 | **Forms** | Forms mode only: each form's team, project, word count and overall comment |
+| **Placeholder checks** | One line per placeholder, URL, link or tag problem: where it is, the level, what's wrong and whether review fixed it |
 | **About** | Inputs, date, and how the numbers are calculated |
+
+The Summary and Segments tabs also count placeholder errors in the raw AI output, errors left in the final
+text, and source issues.
 
 As a rule of thumb for TER:
 
@@ -148,9 +155,12 @@ emailed or put on SharePoint as it is. It contains:
   verdict.
 - **Issue profile** (forms): items by severity and by category, and how the segments split by amount of
   editing. For export comparisons, the editing split is shown on its own.
+- **Placeholder checks**: per language, how many items have placeholders, URLs, links or tags, errors in
+  the AI output, how many review fixed, errors left in the final text and source issues, then a list of
+  every problem found, the ones left in the final text first
 - **Detail**: each language's assessment (with findings), each form's overall comment, then every item
-  (forms) or every edited segment (exports, most edited first) with its changes highlighted. A switch shows
-  the raw and final text in full instead.
+  (forms) or every edited segment (exports, most edited first) with its changes highlighted and any
+  placeholder check results. A switch shows the raw and final text in full instead.
 - **Form check** (forms): which header fields each form is missing, items without a severity, category or
   comment, a locale code typed into the team field, Minor items, cells holding two AI outputs, and the
   content each form covers
@@ -158,7 +168,8 @@ emailed or put on SharePoint as it is. It contains:
 
 Every chart and table lists languages in the same order: highest TER first.
 
-The figures, charts, caveats and form check are calculated directly from the data, without AI. The
+The figures, charts, caveats, form check and placeholder checks are calculated directly from the data,
+without AI. The
 conclusions come from reading the reviewers' comments. Write your findings in a Markdown file and pass it
 with `--notes`, and they appear at the top of the report under **Findings**:
 
@@ -204,7 +215,8 @@ To keep conclusions consistent between drops:
 
 - **Record decisions in a context file.** Copy `prompts/context_template.md` to `data/<client>_context.md`
   and record product names, what each placeholder means, style rules and decisions the client has made.
-  Both routes use it.
+  Both routes use it. Rules the tool can check go in `data/placeholder_rules.json` (see
+  [Placeholder checks](#placeholder-checks)).
 - **Compare with the last drop.** Give the previous drop's findings as well, and the new findings will say
   what changed.
 
@@ -213,6 +225,44 @@ findings yourself before you share them, and have a linguist check any example w
 matters.
 Evaluation data is client content, so check that your agreement with the client allows it to be processed
 by the AI service you use.
+
+## Placeholder checks
+
+Every run checks each segment's placeholders, URLs, links and tags, without AI:
+
+| Check | Level | What it flags |
+|---|---|---|
+| Placeholders | Error | A placeholder missing, added, renamed or appearing a different number of times than in the source |
+| Broken placeholder | Error | Braces that don't match, such as `{{name}` or `{name}}`, or a name that isn't valid, such as a translated one |
+| URL path | Error | Text after a URL placeholder that was changed, e.g. `{{baseUrl}}/login` translated |
+| Link | Check | A link target or URL that differs from the source |
+| Tags | Check | An HTML tag missing or added |
+| Client rules | Error or Check | A word before (or a suffix after) a placeholder that already includes it, as set in the rules file |
+| Source issue | Source issue | The same client rules broken in the source: report these to the client |
+
+`{{name}}`, Lokalise's on-screen `1:name` and Lokalise's `[%1$s:name]` count as the same placeholder, so
+the way text was pasted doesn't cause false errors. Each problem gets a status: *Fixed in review*, *Left in
+final* (still wrong after review: fix before release), *Introduced in review* or *Report to client*.
+
+On forms, only the logged items are checked. With full exports (`compare` or `table`), every string is
+checked, which is where the checks pay off.
+
+**Client rules.** Some placeholders already include words: a "to" phrase that becomes "to France" in
+English and "nach Frankreich" in German, or a name that includes its article. Typing a preposition or an
+article before them doubles it. Rules for these go in a JSON file. Copy
+`config/placeholder_rules.example.json` to `data/placeholder_rules.json` and edit it. The tool reads that
+file automatically, or the one you pass with `--rules`. Each rule gives:
+
+- `placeholders`: a regular expression for the placeholder names it covers
+- `not_before`: for each language code, the words that must not come right before them
+- `no_suffix_after`: languages where letters stuck after them are wrong (Turkish case endings)
+- `level`: `Error`, or `Check` when the word is sometimes right
+- `replaces` (optional): a placeholder that may stand in for another, reported as a note rather than an
+  error
+
+The source is checked against the `source_language` list, and problems there are reported as source
+issues. Have a linguist confirm each language's word list. Client rules name the client's placeholders, so
+keep them in `data/`, which git ignores.
 
 ## Using a different form template
 
@@ -266,8 +316,10 @@ translation_quality/      The tool
   stats.py                Per-language totals and editing levels
   excel.py                Writing the workbook
   html_report.py          Writing the HTML report
+  checks.py               Placeholder, URL, link and tag checks, and client placeholder rules
   cli.py                  Command-line options
 config/form_layout.json   Where things are on the evaluation form
+config/placeholder_rules.example.json   Example client placeholder rules (copy to data/)
 prompts/                  The findings prompt and the client context template
 .claude/skills/           The Claude Code skill that writes findings (/write-findings)
 samples/                  Invented test files and an example findings file (make_samples.py recreates the data)
