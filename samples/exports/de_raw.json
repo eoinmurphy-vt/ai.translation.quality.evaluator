@@ -1,0 +1,14 @@
+{
+  "checkout": {
+    "title": "Kasse",
+    "ships": "Ihre Bestellung wird innerhalb von 2 Geschäftstagen verschickt.",
+    "cta": "Bestellung aufgeben"
+  },
+  "account": {
+    "signin": "Melden Sie sich an, um Ihre Belohnungen zu sehen",
+    "cart_count": "{{count}} Artikel in Ihrem Warenkorb"
+  },
+  "footer": {
+    "help": "Brauchen Sie Hilfe? Kontaktieren Sie uns."
+  }
+}

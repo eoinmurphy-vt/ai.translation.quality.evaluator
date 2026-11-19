@@ -1,0 +1,14 @@
+{
+  "checkout": {
+    "title": "Checkout",
+    "ships": "Your order ships within 2 business days.",
+    "cta": "Place order"
+  },
+  "account": {
+    "signin": "Sign in to see your rewards",
+    "cart_count": "{{count}} items in your cart"
+  },
+  "footer": {
+    "help": "Need help? Contact us."
+  }
+}

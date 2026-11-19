@@ -1,0 +1,14 @@
+{
+  "checkout": {
+    "title": "Kasse",
+    "ships": "Ihre Bestellung wird innerhalb von 2 Werktagen versendet.",
+    "cta": "Jetzt bestellen"
+  },
+  "account": {
+    "signin": "Melde dich an, um deine Prämien zu sehen",
+    "cart_count": "{{count}} Artikel in deinem Warenkorb"
+  },
+  "footer": {
+    "help": "Brauchst du Hilfe? Kontaktiere uns."
+  }
+}

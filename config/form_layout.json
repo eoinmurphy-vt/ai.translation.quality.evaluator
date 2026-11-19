@@ -1,0 +1,24 @@
+{
+  "_comment": "Where things are on the AI Human Evaluation Form. Column letters and cell addresses as in Excel. Set a column to null if the form doesn't have it. Pass a different file with --layout to read another template.",
+  "sheet": "AI Output Evaluation",
+  "first_data_row": 16,
+  "columns": {
+    "task": "A",
+    "source": "B",
+    "raw": "C",
+    "corrected": "D",
+    "category": "E",
+    "severity": "F",
+    "comment": "G",
+    "key": null
+  },
+  "header_cells": {
+    "language": "B7",
+    "team": "B8",
+    "project": "B9",
+    "word_count": "B10",
+    "overall_comment": "B11"
+  },
+  "severity_levels": ["Critical", "Major", "Minor"],
+  "category_separator": " - "
+}

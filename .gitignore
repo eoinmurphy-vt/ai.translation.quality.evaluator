@@ -1,0 +1,34 @@
+# Evaluation forms, exports and results contain client content and must never be committed.
+# Inputs go in data/, results are written to output/.
+data/*
+!data/README.md
+output/
+
+# Safety net for client files dropped anywhere else
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+*.json
+*.xliff
+*.xlf
+~$*
+
+# Allowed: the tool's own settings and the invented sample files
+!config/*.json
+!samples/**
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+# Editors and OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

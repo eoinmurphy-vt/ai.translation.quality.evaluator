@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en" target-language="ja" datatype="plaintext" original="sample">
+    <body>
+      <trans-unit id="nav.track" resname="nav.track">
+        <source>Track your package</source>
+        <target>荷物を追跡</target>
+      </trans-unit>
+      <trans-unit id="returns.banner" resname="returns.banner">
+        <source>Free returns within 30 days</source>
+        <target>30日以内なら返品無料</target>
+      </trans-unit>
+      <trans-unit id="checkout.cta" resname="checkout.cta">
+        <source>Place order</source>
+        <target>注文する</target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>
