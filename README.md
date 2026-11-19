@@ -12,6 +12,8 @@ and keeps the reviewers' severity and category ratings alongside it.
 - Measures Japanese, Chinese and Thai per character, because they don't put spaces between words
 - Shows every change in Excel: removed text in red strikethrough, added text in green underline
 - Writes every rate as an Excel formula, so anyone can check the numbers
+- Optionally writes an HTML report to share: charts, a scorecard, reviewer comments, every item with its
+  changes highlighted, and your own written findings at the top
 
 It runs on its own: Python plus one package. No AI tools or Claude Code are needed.
 
@@ -29,11 +31,12 @@ git clone https://github.com/eoinmurphy-vt/ai.translation.quality.evaluator.git
 cd ai.translation.quality.evaluator
 pip install -r requirements.txt
 python evaluate.py selftest
-python evaluate.py forms samples/forms
+python evaluate.py forms samples/forms --html
 ```
 
-The workbook is saved in `output/`. Open it and start on the **Summary** tab. The files in `samples/` are
-invented, so you can try every mode before using real data.
+The workbook and the HTML report are saved in `output/`. Open the workbook on the **Summary** tab, or open
+the `.html` file in any browser. The files in `samples/` are invented, so you can try every mode before using
+real data.
 
 ## Three ways to measure
 
@@ -93,7 +96,13 @@ don't matter):
 | Option | What it does |
 |---|---|
 | `-o`, `--output FILE` | Where to save the workbook (default: `output/TER_<mode>_<date>.xlsx`) |
+| `--html` | Also write an HTML report, with the same name as the workbook |
+| `--html-output FILE` | Write the HTML report to this file instead |
+| `--title TEXT` | Title of the HTML report, e.g. `"Drop 2 review"` |
+| `--notes FILE` | Markdown file with your written findings, shown at the top of the HTML report |
 | `--json FILE` | Also save all results as JSON, for dashboards or further processing |
+
+`--html-output`, `--title` and `--notes` each turn on the HTML report, so `--html` isn't needed with them.
 
 `python evaluate.py <mode> --help` lists every option.
 
@@ -116,6 +125,30 @@ As a rule of thumb for TER:
 | Over 50% | Close to a retranslation |
 
 TER can go over 100% when the reviewer's version is much shorter than the AI's.
+
+## The HTML report
+
+One self-contained `.html` file that opens in any browser and needs no internet connection, so it can be
+emailed or put on SharePoint as it is. It contains:
+
+- Headline counts: items or segments, severity totals, and how much of the text changed
+- **TER by language**: every segment as a dot, with each language's overall TER marked
+- **Scorecard**: one row per language, with an editing level from the rule of thumb above
+- **Issue profile** (forms): items by severity and by category, and how the segments split by amount of
+  editing. For export comparisons, the editing split is shown on its own.
+- **Detail**: each form's overall comment, then every item (forms) or every edited segment (exports, most
+  edited first) with its changes highlighted. A switch shows the raw and final text in full instead.
+- **Method**: how the numbers are calculated, and which files were read
+
+The tool can't write conclusions; those come from reading the reviewers' comments. Write your findings in a
+Markdown file and pass it with `--notes`, and they appear at the top of the report under **Findings**:
+
+```bash
+python evaluate.py forms "data/Drop 2 forms" --title "Drop 2 review" --notes data/drop2_findings.md
+```
+
+The notes file supports headings (`#`, `##`), paragraphs, bullet and numbered lists, `**bold**`, `*italic*`,
+`` `code` ``, `> quotes` and `[links](https://...)`. See `samples/findings_example.md`.
 
 ## Using a different form template
 
@@ -142,9 +175,10 @@ alongside the reviewers' severity ratings and comments.
 
 ## Keeping client data out of GitHub
 
-Evaluation forms, exports and results contain client content. Put input files in `data/`; results go to
-`output/`. Git ignores both folders, and also ignores `.xlsx`, `.xlsm`, `.csv`, `.json` and XLIFF files
-anywhere except `samples/` and `config/`. Check `git status` before every commit.
+Evaluation forms, exports, workbooks and HTML reports contain client content. Put input files and findings
+notes in `data/`; results go to `output/`. Git ignores both folders, and also ignores `.xlsx`, `.xlsm`,
+`.csv`, `.json`, `.html` and XLIFF files anywhere except `samples/` and `config/`. Check `git status` before
+every commit.
 
 ## Tests
 
@@ -161,10 +195,12 @@ translation_quality/      The tool
   text.py                 Tokens, placeholders, per-segment measures, change highlighting
   languages.py            Language codes from file names and form fields
   readers.py              Reading forms, exports and tables
+  stats.py                Per-language totals and editing levels
   excel.py                Writing the workbook
+  html_report.py          Writing the HTML report
   cli.py                  Command-line options
 config/form_layout.json   Where things are on the evaluation form
-samples/                  Invented test files (make_samples.py recreates them)
+samples/                  Invented test files and an example findings file (make_samples.py recreates the data)
 tests/                    Unit and end-to-end tests
 data/                     Your input files (ignored by git)
 output/                   Results (ignored by git)

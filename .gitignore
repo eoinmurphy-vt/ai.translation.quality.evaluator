@@ -12,6 +12,7 @@ output/
 *.json
 *.xliff
 *.xlf
+*.html
 ~$*
 
 # Allowed: the tool's own settings and the invented sample files

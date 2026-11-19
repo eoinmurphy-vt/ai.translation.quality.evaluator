@@ -7,6 +7,7 @@ from datetime import datetime
 
 from . import __version__
 from .readers import InputError, compare_exports, load_layout, read_forms, read_pairs_table
+from .stats import summarise
 from .ter import ter
 from .text import tokenize
 
@@ -14,30 +15,12 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_LAYOUT_FILE = os.path.join(REPO_ROOT, "config", "form_layout.json")
 
 EXAMPLES = """examples:
-  python evaluate.py forms "data/Drop2 forms"
-  python evaluate.py compare --raw data/de_raw.json --final data/de_final.json --lang de-DE
+  python evaluate.py forms "data/Drop2 forms" --html
+  python evaluate.py forms "data/Drop2 forms" --title "Drop 2 review" --notes data/drop2_findings.md
+  python evaluate.py compare --raw data/de_raw.json --final data/de_final.json --lang de-DE --html
   python evaluate.py table data/pairs.xlsx -o output/batch_TER.xlsx
   python evaluate.py selftest
 """
-
-
-def _summarise(rows):
-    """Per-language totals for the console and the JSON output."""
-    out = {}
-    for r in rows:
-        s = out.setdefault(r["language"], {"unit": r["unit"], "rows": 0, "measured": 0, "unchanged": 0,
-                                           "edits": 0, "ref_len": 0, "char_edits": 0, "ref_chars": 0})
-        s["rows"] += 1
-        m = r.get("metrics")
-        if m:
-            s["measured"] += 1
-            s["unchanged"] += m["edits"] == 0
-            for k in ("edits", "ref_len", "char_edits", "ref_chars"):
-                s[k] += m[k]
-    for s in out.values():
-        s["ter"] = s["edits"] / s["ref_len"] if s["ref_len"] else None
-        s["char_rate"] = s["char_edits"] / s["ref_chars"] if s["ref_chars"] else None
-    return out
 
 
 def _print_summary(summary, rows_label):
@@ -84,6 +67,12 @@ def build_parser():
     def common(sp):
         sp.add_argument("-o", "--output", help="Excel file to write (default: output/TER_<mode>_<date>.xlsx)")
         sp.add_argument("--json", help="also write the results as JSON to this file")
+        sp.add_argument("--html", action="store_true",
+                        help="also write an HTML report next to the workbook (same name, .html)")
+        sp.add_argument("--html-output", metavar="FILE", help="write the HTML report to this file (implies --html)")
+        sp.add_argument("--title", help="title of the HTML report (implies --html)")
+        sp.add_argument("--notes", metavar="FILE",
+                        help="Markdown file with written findings, shown at the top of the HTML report (implies --html)")
 
     f = sub.add_parser("forms", help="evaluation forms with logged issues (.xlsx/.xlsm)",
                        description="Read AI Human Evaluation Forms and measure every logged segment.")
@@ -121,35 +110,57 @@ def main(argv=None):
     from .excel import write_forms_workbook, write_pairs_workbook  # openpyxl import only when needed
 
     out = args.output or _default_output(args.mode)
+    want_html = args.html or args.html_output or args.title or args.notes
+    html_out = args.html_output or os.path.splitext(out)[0] + ".html"
+    notes = None
+    if args.notes:
+        try:
+            with open(args.notes, encoding="utf-8-sig") as fh:
+                notes = fh.read()
+        except OSError as exc:
+            print(f"\nError: can't read the notes file {args.notes}: {exc}", file=sys.stderr)
+            return 2
+    levels, forms = [], None
     try:
         if args.mode == "forms":
             layout = load_layout(args.layout)
             print("Reading evaluation forms:")
             forms, rows = read_forms(args.paths, layout)
-            write_forms_workbook(forms, rows, out, layout["severity_levels"], args.paths)
+            levels = layout["severity_levels"]
+            inputs = args.paths
+            write_forms_workbook(forms, rows, out, levels, inputs)
             extra = {"forms": forms}
             label = "Items"
         elif args.mode == "compare":
             rows = compare_exports(args.raw, args.final, args.lang, args.source, args.unit,
                                    args.text_column, args.source_column)
-            write_pairs_workbook(rows, out, [f"raw: {args.raw}", f"final: {args.final}", f"language: {args.lang}"])
+            inputs = [f"raw: {args.raw}", f"final: {args.final}", f"language: {args.lang}"]
+            write_pairs_workbook(rows, out, inputs)
             extra, label = {}, "Keys"
         else:
             rows = read_pairs_table(args.table, args.sheet)
-            write_pairs_workbook(rows, out, [args.table])
+            inputs = [args.table]
+            write_pairs_workbook(rows, out, inputs)
             extra, label = {}, "Rows"
+        if want_html:
+            from .html_report import build_report, write_report
+            page = build_report(rows, "forms" if args.mode == "forms" else "pairs", inputs, title=args.title,
+                                notes=notes, forms=forms, severity_levels=levels)
+            write_report(html_out, page)
     except InputError as exc:
         print(f"\nError: {exc}", file=sys.stderr)
         return 2
-    except PermissionError:
-        print(f"\nError: can't write {out}. If it is open in Excel, close it and run again.", file=sys.stderr)
+    except PermissionError as exc:
+        print(f"\nError: can't write {exc.filename or out}. If it is open, close it and run again.", file=sys.stderr)
         return 2
-    summary = _summarise(rows)
+    summary = summarise(rows)
     _print_summary(summary, label)
     if args.json:
         _write_json(args.json, rows, summary, extra)
         print(f"\nJSON written to {args.json}")
     print(f"\nWorkbook written to {out}")
+    if want_html:
+        print(f"HTML report written to {html_out}")
     if args.mode == "forms":
         print("Note: forms list only the segments reviewers logged, so this TER describes those segments, "
               "not the whole job.")
