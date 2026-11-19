@@ -15,15 +15,19 @@ and keeps the reviewers' severity and category ratings alongside it.
 - Optionally writes an HTML report to share: charts, a scorecard, reviewer comments, every item with its
   changes highlighted, and your own written findings at the top
 
-It runs on its own: Python plus one package. No AI tools or Claude Code are needed.
+The measurements, workbook and HTML report need only Python and one package. Only the optional written
+findings use Claude.
 
 ## What you need
 
 - **Python 3.9 or later.** On Windows, install it from [python.org](https://www.python.org/downloads/)
   and tick *Add python.exe to PATH* during setup.
-- **The openpyxl package**, installed with `pip install -r requirements.txt` (see below).
+- **The openpyxl package**, installed with `pip install -r requirements.txt` (see [Quick start](#quick-start)).
 - Excel, or any spreadsheet app, to read the results.
-- **Optional: Claude**, to write the findings: the bottom line, root causes, language assessments and recommendations at the top of the HTML report. In Claude Code it’s /write-findings; a claude.ai account also works. Without Claude you still get the full workbook and HTML report, just without written findings. See Writing the findings with Claude.
+- **Optional: Claude**, to write the findings: the bottom line, root causes, language assessments and
+  recommendations at the top of the HTML report. In Claude Code it's `/write-findings`; a claude.ai account
+  also works. Without Claude you still get the full workbook and HTML report, just without written findings.
+  See [Writing the findings with Claude](#writing-the-findings-with-claude).
 
 ## Quick start
 
