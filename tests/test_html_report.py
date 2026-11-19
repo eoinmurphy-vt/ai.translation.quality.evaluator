@@ -230,12 +230,23 @@ class CommandLineTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertTrue(os.path.isfile(target))
 
-    def test_missing_notes_file_is_a_clear_error(self):
+    def test_missing_notes_file_explains_what_to_do(self):
+        missing = os.path.join(SAMPLES, "no_such_findings.md")
         err = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
-            code = main(["table", os.path.join(SAMPLES, "pairs.csv"), "--notes", "no_such_notes.md"])
+            code = main(["table", os.path.join(SAMPLES, "pairs.csv"), "--notes", missing])
+        message = err.getvalue()
         self.assertEqual(code, 2)
-        self.assertIn("notes file", err.getvalue())
+        for text in ("there's no findings file at", "doesn't write them", "leave out --notes", "/write-findings",
+                     "findings_example.md"):      # the findings files that do exist in that folder are listed
+            self.assertIn(text, message)
+
+    def test_missing_notes_folder_lists_the_data_folder_instead(self):
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = main(["table", os.path.join(SAMPLES, "pairs.csv"), "--notes", "no/such/folder/notes.md"])
+        self.assertEqual(code, 2)
+        self.assertIn("data", err.getvalue().splitlines()[-1])
 
 
 class LanguageOverrideTests(unittest.TestCase):

@@ -36,6 +36,32 @@ def _default_output(mode):
     return os.path.join("output", f"TER_{mode}_{datetime.now():%Y%m%d-%H%M}.xlsx")
 
 
+def _missing_notes_message(path):
+    """Explain that findings must exist before --notes can use them, and list the ones that do."""
+    folder = os.path.dirname(path) or "."
+    if not os.path.isdir(folder):
+        folder = os.path.join(REPO_ROOT, "data")
+    try:
+        existing = sorted(f for f in os.listdir(folder) if f.lower().endswith(".md") and f.lower() != "readme.md")
+    except OSError:
+        existing = []
+    shown = folder
+    if os.path.isabs(folder):
+        try:
+            shown = os.path.relpath(folder)
+        except ValueError:  # on another drive (Windows)
+            pass
+    shown = os.path.join(shown, "")
+    found = (f"Findings files in {shown}: {', '.join(existing)}" if existing
+             else f"There are no findings files in {shown} yet.")
+    return (f"\nError: there's no findings file at {path}.\n"
+            "--notes reads findings that already exist; the tool doesn't write them.\n"
+            "  - For a report without findings, leave out --notes.\n"
+            "  - To write findings with Claude, run /write-findings in Claude Code\n"
+            "    (README: \"Writing the findings with Claude\").\n"
+            f"{found}")
+
+
 def _write_json(path, rows, summary, extra=None):
     payload = {"tool_version": __version__, "summary": summary, "rows": rows, **(extra or {})}
     with open(path, "w", encoding="utf-8") as fh:
@@ -119,6 +145,9 @@ def main(argv=None):
         if path and os.path.dirname(path):
             os.makedirs(os.path.dirname(path), exist_ok=True)
     notes = None
+    if args.notes and not os.path.isfile(args.notes):
+        print(_missing_notes_message(args.notes), file=sys.stderr)
+        return 2
     if args.notes:
         try:
             with open(args.notes, encoding="utf-8-sig") as fh:
