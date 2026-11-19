@@ -206,6 +206,8 @@ data/                     Your input files (ignored by git)
 output/                   Results (ignored by git)
 ```
 
-## Licence
+### 📝 License
 
-No licence has been chosen yet. Add a `LICENSE` file before sharing this outside the company.
+This project is licensed under the Apache 2.0 License. © 2026 Vistatec, Ltd.
+
+```
