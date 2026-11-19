@@ -23,6 +23,7 @@ It runs on its own: Python plus one package. No AI tools or Claude Code are need
   and tick *Add python.exe to PATH* during setup.
 - **The openpyxl package**, installed with `pip install -r requirements.txt` (see below).
 - Excel, or any spreadsheet app, to read the results.
+- **Optional: Claude**, to write the findings: the bottom line, root causes, language assessments and recommendations at the top of the HTML report. In Claude Code it’s /write-findings; a claude.ai account also works. Without Claude you still get the full workbook and HTML report, just without written findings. See Writing the findings with Claude.
 
 ## Quick start
 
