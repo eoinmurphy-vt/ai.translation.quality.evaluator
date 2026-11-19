@@ -112,6 +112,9 @@ def main(argv=None):
     out = args.output or _default_output(args.mode)
     want_html = args.html or args.html_output or args.title or args.notes
     html_out = args.html_output or os.path.splitext(out)[0] + ".html"
+    for path in (out, html_out if want_html else None, args.json):
+        if path and os.path.dirname(path):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
     notes = None
     if args.notes:
         try:
@@ -156,7 +159,8 @@ def main(argv=None):
     summary = summarise(rows)
     _print_summary(summary, label)
     if args.json:
-        _write_json(args.json, rows, summary, extra)
+        _write_json(args.json, rows, summary, {**extra, "mode": args.mode, "inputs": inputs,
+                                               "severity_levels": levels, "created": datetime.now().isoformat(timespec="minutes")})
         print(f"\nJSON written to {args.json}")
     print(f"\nWorkbook written to {out}")
     if want_html:

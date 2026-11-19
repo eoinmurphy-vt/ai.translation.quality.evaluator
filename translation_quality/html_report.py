@@ -535,7 +535,10 @@ header.top{display:grid;gap:14px}.lede{color:var(--ink-2);font-size:1.04rem;max-
 .toc a{text-decoration:none}.toc a:hover{text-decoration:underline}
 .findings{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:24px clamp(16px,3vw,32px);display:grid;gap:12px;max-width:100%}
 .findings p,.findings li{max-width:74ch}.findings ul,.findings ol{margin:0;padding-left:1.3em;display:grid;gap:8px}
-.findings h3{margin-top:6px}.findings blockquote{margin:0}
+.findings h3{font-size:1.15rem;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.findings h2+h3{margin-top:0;padding-top:0;border-top:0}
+.findings h4{font-size:1rem;text-transform:none;letter-spacing:0;color:var(--ink);margin-top:6px}
+.findings h5{font-size:.92rem;margin-top:4px}.findings blockquote{margin:0}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px clamp(14px,2.5vw,24px);display:grid;gap:14px;align-content:start;min-width:0}
 .panel .sub{font-size:.84rem;color:var(--muted);margin-top:-8px}
 .two{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:16px}

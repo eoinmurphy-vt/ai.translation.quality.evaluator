@@ -167,6 +167,20 @@ class CommandLineTests(unittest.TestCase):
                     self.assertTrue(os.path.isfile(out))
                     self.assertIn("Workbook written", stdout)
 
+    def test_output_folders_are_created(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "new", "folder", "result.xlsx")
+            data = os.path.join(tmp, "other", "result.json")
+            code, _, _ = self.run_cli("forms", FORMS, "-o", out, "--json", data, "--html")
+            self.assertEqual(code, 0)
+            for path in (out, data, os.path.splitext(out)[0] + ".html"):
+                self.assertTrue(os.path.isfile(path), path)
+            with open(data, encoding="utf-8") as fh:
+                payload = json.load(fh)
+            self.assertEqual(payload["mode"], "forms")
+            self.assertEqual(payload["severity_levels"], ["Critical", "Major", "Minor"])
+            self.assertIn("overall_comment", payload["forms"][0])
+
     def test_missing_input_is_a_clear_error(self):
         code, _, err = self.run_cli("table", "no_such_file.csv", "-o", os.devnull)
         self.assertEqual(code, 2)

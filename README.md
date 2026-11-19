@@ -150,6 +150,38 @@ python evaluate.py forms "data/Drop 2 forms" --title "Drop 2 review" --notes dat
 The notes file supports headings (`#`, `##`), paragraphs, bullet and numbered lists, `**bold**`, `*italic*`,
 `` `code` ``, `> quotes` and `[links](https://...)`. See `samples/findings_example.md`.
 
+## Writing the findings with Claude
+
+`prompts/findings_prompt.md` holds the analysis method: how to read every item, trace each error to its
+root cause, group causes into themes, assess each language and recommend actions. It also sets the rules
+that keep conclusions honest (exact counts, what form-based TER can and can't show, glossing every
+example) and the output format the report expects. The tool itself still needs no AI; only this step uses
+Claude.
+
+**With Claude Code** (recommended): open this folder in Claude Code and ask, for example, *"write up the
+Drop 3 forms in data/Drop 3"*, or type `/write-findings`. The skill in `.claude/skills/write-findings/`:
+
+1. runs the tool
+2. follows the prompt and checks the numbers against the results
+3. saves `data/<drop>_findings.md`
+4. rebuilds the HTML report with the findings at the top
+
+**With claude.ai**: run the tool with `--json output/<drop>.json`, start a new chat, attach the JSON, paste
+everything below the line in `prompts/findings_prompt.md`, and save the reply as `data/<drop>_findings.md`.
+Then build the report with `--notes`.
+
+To keep conclusions consistent between drops:
+
+- **Record decisions in a context file.** Copy `prompts/context_template.md` to `data/<client>_context.md`
+  and record product names, what each placeholder means, style rules and decisions the client has made.
+  Both routes use it.
+- **Compare with the last drop.** Give the previous drop's findings as well, and the new findings will say
+  what changed.
+
+Read the findings before you share them. Have a linguist check any example where the exact meaning matters.
+Evaluation data is client content, so check that your agreement with the client allows it to be processed
+by the AI service you use.
+
 ## Using a different form template
 
 `config/form_layout.json` says where everything is on the form: the sheet name, the first data row, which
@@ -200,6 +232,8 @@ translation_quality/      The tool
   html_report.py          Writing the HTML report
   cli.py                  Command-line options
 config/form_layout.json   Where things are on the evaluation form
+prompts/                  The findings prompt and the client context template
+.claude/skills/           The Claude Code skill that writes findings (/write-findings)
 samples/                  Invented test files and an example findings file (make_samples.py recreates the data)
 tests/                    Unit and end-to-end tests
 data/                     Your input files (ignored by git)
@@ -210,4 +244,4 @@ output/                   Results (ignored by git)
 
 This project is licensed under the Apache 2.0 License. © 2026 Vistatec, Ltd.
 
-```
+---
